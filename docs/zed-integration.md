@@ -35,6 +35,8 @@ Checks passed:
 
 This testing exposed two problems that were fixed: System Events could return stale AX window objects, and a Zed helper process had the same executable path as the GUI process. GUI PID resolution now uses `NSRunningApplication` by bundle ID. `native-zed.ts` reads and raises fresh AX elements through standard JXA/ApplicationServices, without a Swift runtime/compiler dependency or simulated keys. A Zed move reports success only after focused-title confirmation.
 
-Still unverified: moving across a different Space/fullscreen desktop, remote/multi-root workspace variants, and VS Code/Cursor regression behavior. These were not tested by changing the user's existing desktop arrangement.
+Still unverified: moving across a different Space/fullscreen desktop and remote/multi-root workspace variants. These were not tested by changing the user's existing desktop arrangement.
+
+Out of scope: jumping to a live session hosted in VS Code, Cursor or any other editor. Host detection, window matching and the Window-menu fallback are designed and tested for Zed only, and may not work elsewhere.
 
 Future terminal automation requires a delivery mechanism tied to the intended terminal. A new `sidebar_terminal_threads` row or a foreground check alone does not provide that guarantee. No actual session was launched or resumed as part of the window smoke tests.

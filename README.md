@@ -1,94 +1,104 @@
 # Raycast Zed Agent Sessions
 
-Search local **Claude Code and Codex** sessions from Raycast and return to their project windows in Zed.
+Search local **Claude Code and Codex** sessions from Raycast and jump back to their project windows in Zed.
 
-This extends the original Claude Code Sessions extension. Its internal extension name (`claude-code-sessions`) and command ID (`sessions`) are retained so existing Raycast aliases and shortcuts can continue to work. The GitHub repository is [raycast-zed-agent-sessions](https://github.com/SomaTomita/raycast-zed-agent-sessions).
+Extends the original Claude Code Sessions extension. The extension name (`claude-code-sessions`) and command ID (`sessions`) are unchanged, so existing aliases and shortcuts keep working.
 
-## What it does
+## Usage
 
-- Shows Claude and Codex sessions in one searchable list, with provider labels.
-- Selects Claude Code / Codex in the top agent dropdown. **Filter Sessions** (Cmd+Shift+F) combines process status, working state, and exact project directory. Same-named projects remain separate.
-- Reads recent conversation previews and a larger transcript view for either provider.
-- Goes back to an existing session's hosting window or scriptable terminal tab.
-- Opens a stopped session's project and copies its validated resume command for manual use in Zed.
-- Offers an explicit Zed window picker when the project-to-window mapping is uncertain.
+1. Install: `npm install && npm run dev` loads the extension into Raycast.
+2. Grant Raycast macOS Accessibility permission (System Settings > Privacy & Security > Accessibility). Window selection needs it.
+3. Open the **Coding Agent Sessions** command. Type to search; pick Claude or Codex in the top dropdown.
+4. Press **Enter** on a row:
+   - **Open Session** (live process): jumps to its Zed window or terminal tab.
+   - **History** (stopped): copies the resume command and moves to the project's Zed window, or opens one if none exists. Paste the command into that project's Zed terminal.
+5. Press **Cmd+K** for more actions: transcript, filters, Choose Zed Window, resume in Terminal/iTerm2. Shortcuts are listed under [Actions](#actions).
 
-## Zed behavior
+## Features
 
-Claude is orange and Codex is blue. Working is yellow; Idle is neutral gray so activity and provider colors do not compete. Open Sessions use filled provider-colored circles; History uses gray clock icons. The list has two sections: **Open Sessions** for sessions with observed live ownership, and **History** for saved conversations without confirmed live ownership. History does not prove a process has stopped; detailed runtime evidence remains in the detail pane.
+- One searchable list for both providers, with provider labels.
+- Agent dropdown plus **Filter Sessions** (Cmd+Shift+F): process status, working state, exact project directory. Same-named projects stay separate.
+- Conversation previews and a full transcript view.
+- Jump to the window or terminal tab hosting a live session.
+- For a stopped session: reveal the project window and copy a validated resume command.
+- **Choose Zed Window** when the project-to-window mapping is uncertain.
 
-Only confirmed activity is badged **Working** or **Idle**. Activity that cannot be established has no badge; it is never guessed to be idle. The list does not show project-open icons: a folder being open in Zed is not evidence that the conversation itself is open.
+## How it behaves
 
-For a live session, Enter tries to reach its existing host. For Zed, the extension corroborates a window title with local project paths recorded in Zed's Stable workspace database. It refuses automatic selection when several paths or windows share a name. A window-level jump does **not** mean that the correct terminal tab has been selected. Direct macOS Accessibility is used to raise the window and confirm the focused title; the Window menu remains a fallback for other Spaces. System Events can cache stale window objects, so its successful menu action alone is not considered proof of a Zed window jump.
+Open Sessions have observed live ownership. History is everything else; it does not prove the process stopped. Only confirmed activity is badged **Working** or **Idle**. Unknown activity gets no badge and is never guessed as idle.
 
-For history, Enter copies a resume command and tries to reveal the project's window. It creates a new window only when the project is not found by the resolver. If workspace information is unavailable or ambiguous, it reports that and leaves the command available for manual use. Use **Choose Zed Window** to select a unique window title yourself, or **Open Project in New Zed Window** to explicitly create one.
+**Enter on a live session** reaches its host. For Zed, a window title must match a project path from Zed's Stable workspace database. Several matching windows or paths mean no automatic jump. Windows are raised through macOS Accessibility and the focused title is checked; the Window menu is the fallback for other Spaces. A window jump does not select the terminal tab inside it.
 
-New project windows use `zed --new`. If a CLI that guarantees a new window cannot be found, the extension stops instead of handing the path to an arbitrary existing window. Merely moving between windows never sends a command to a terminal.
+**Enter on a history row** copies the resume command, then reveals the project window. A new window (`zed --new`) opens only when no window matches. If the mapping is ambiguous or unavailable, the extension says so and keeps the command in the clipboard. It never hands a path to an existing Zed window, because that can swap its project and kill its terminals.
 
-**Automatic resume inside Zed is not enabled.** Zed 1.25.3's CLI does not expose a terminal-targeted command execution option. PromptCast demonstrates an alternative using command-palette keystrokes and Terminal Threads, but fixed delays and global keystrokes cannot reliably bind input to a particular terminal. This implementation copies the command instead. Paste it only after selecting the intended Zed terminal and checking that the same session is not already running.
+**No automatic resume inside Zed.** Zed's CLI cannot target a terminal, and keystroke automation cannot reliably bind input to one. Paste the copied command into the right Zed terminal yourself, after checking the session is not already running.
 
-The automatic project resolver supports Zed Stable's local workspace records. Remote projects, unsupported path encodings, and Preview/Nightly databases are not used to corroborate Stable windows. A manual window selection is by its displayed title; it is not a verified full-path association. Identically titled windows require selection within Zed itself.
+Sessions hosted in tmux or over ssh have no GUI host to jump to.
 
-## Data sources and status
+## Architecture
 
-### Claude Code
+![Architecture](docs/architecture.png)
 
-- `~/.claude/sessions/<pid>.json`: live registry, validated against running processes.
-- `~/.claude/projects/<project>/<session-id>.jsonl`: recent history and transcript previews.
-- `~/.claude/history.jsonl`: recent prompts.
-- `claude agents --all --json`: optional status and background-job metadata, cached for 45 seconds.
+Reaching a live session (Claude Code and Codex take the same path):
 
-`CLAUDE_CONFIG_DIR` is honored. Live registry refreshes run every 3 seconds; history refreshes every 30 seconds. Unknown registry statuses are not presented as working.
+![Reaching a live session](docs/flow-live.png)
 
-### Codex
+When nothing hosts the session, and the explicit resume paths:
 
-- `~/.codex/state_<version>.sqlite`: a read-only, schema-checked catalog query. The newest compatible database is used.
-- `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`: bounded recent-file fallback if the catalog is unavailable.
-- Open rollout files or `thread-writer-locks/<session-id>.lock` descriptors held by Codex processes: evidence that a session is in use.
+![Nothing hosts it](docs/flow-resume.png)
 
-`CODEX_HOME` is honored. Archived, subagent, and noninteractive `exec` threads are excluded. Other origins may appear as history, but CLI resume actions are offered only for known `cli`/`tui` sources.
+## Data sources
 
-Codex ownership checks use full paths, not filename or directory-name matches. An open descriptor is evidence of use, not proof that the CLI is busy or waiting. For owned sessions, `task_started`, `task_complete`, and `turn_aborted` rollout events provide Working/Idle state. A delayed completion from an older turn does not override a newer turn. The initial lifecycle scan is bounded at 64 MB, and subsequent refreshes read only appended data; oversized or incomplete evidence remains unconfirmed. No hooks or agent-setting changes are required. If a Codex process exists but the selected session cannot be associated with it, status remains **Runtime Unknown**. This also prevents automatic terminal resume. A lock file merely existing on disk is never used as live evidence.
+All reads are local and read-only.
 
-Codex history refreshes every 30 seconds; ownership and activity refresh every 3 seconds. Check the terminal for current activity; the list is a snapshot. Source failures show a notice, and previously loaded rows are retained when a refresh fails.
+| Source                                                 | Used for                                                  |
+| ------------------------------------------------------ | --------------------------------------------------------- |
+| `~/.claude/sessions/<pid>.json`                        | Claude live registry, validated against running processes |
+| `~/.claude/projects/**/<id>.jsonl`, `history.jsonl`    | Claude history and previews                               |
+| `claude agents --all --json`                           | Optional status and background jobs, cached 45 s          |
+| `~/.codex/state_<version>.sqlite`                      | Codex catalog (schema-checked); rollout files as fallback |
+| Open rollout files / `thread-writer-locks` descriptors | Evidence a Codex session is in use                        |
+| Zed Stable workspace database                          | Matching a project path to a window                       |
+
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honored. Live data refreshes every 3 s, history every 30 s.
+
+Codex ownership uses full paths. An open descriptor shows use, not that the CLI is busy. Working/Idle comes from `task_started`, `task_complete` and `turn_aborted` events; a late completion from an older turn never overrides a newer one. While any Codex process is running, a session that none of them visibly holds is shown as **Runtime Unknown** instead of stopped, because a process can own a thread without an open file handle. Automatic resume is blocked for it until Codex exits. A lock file on disk alone is never live evidence. Archived, subagent and noninteractive `exec` threads are excluded; CLI resume is offered only for `cli`/`tui` sources.
 
 ## Actions
 
 | Action                                                           | Shortcut    |
 | ---------------------------------------------------------------- | ----------- |
 | Go to live session window / open project and copy resume command | Enter       |
-| Move to selected editor's project window                         | Cmd+E       |
+| Move to the editor's project window                              | Cmd+E       |
 | Open transcript                                                  | Cmd+Enter   |
 | Toggle details                                                   | Cmd+D       |
 | Copy resume command                                              | Cmd+Shift+C |
 | Copy session ID                                                  | Cmd+.       |
-| Refresh sources                                                  | Cmd+R       |
+| Refresh                                                          | Cmd+R       |
 
-The action panel also offers **Choose Zed Window**, explicit new-window opening, folder/transcript reveal, and **Resume in Terminal/iTerm2** for stopped sessions. Terminal resume rechecks ownership and suppresses overlapping requests within the extension. It cannot atomically exclude another program starting the same session at the same instant. Live or uncertain sessions are never automatically resumed. The extension does not terminate processes from its action panel.
+Also in the panel: **Choose Zed Window**, open in a new window, reveal folder/transcript, and **Resume in Terminal/iTerm2** for stopped sessions. That rechecks ownership and never resumes a live or uncertain session. The extension never terminates processes.
 
-VS Code and Cursor remain available in editor preferences. They retain project-window navigation and explicit new-window opening; they do not gain Zed-specific database logic.
+**VS Code and Cursor: jumping to a live session is not supported.** Host detection and window matching are designed and tested for Zed only, and may not work for other editors. Choosing them in preferences affects only **Move to Project** and **Open Project in New Window**, which are best effort and untested.
 
 ## Preferences
 
-| Preference    | Default  | Meaning                                                     |
-| ------------- | -------- | ----------------------------------------------------------- |
-| Editor        | Zed      | Project window navigation and explicit opening              |
-| Terminal      | Terminal | Optional external terminal resume; iTerm2 is also supported |
-| Claude CLI    | claude   | Known executable lookup or an absolute executable path      |
-| Codex CLI     | codex    | Known executable lookup or an absolute executable path      |
-| History Limit | 80       | Recent sessions per provider, capped at 500                 |
+| Preference    | Default  | Meaning                                         |
+| ------------- | -------- | ----------------------------------------------- |
+| Editor        | Zed      | Zed is the supported editor (see above)         |
+| Terminal      | Terminal | External terminal resume; iTerm2 also supported |
+| Claude CLI    | claude   | Known executable lookup or absolute path        |
+| Codex CLI     | codex    | Known executable lookup or absolute path        |
+| History Limit | 80       | Recent sessions per provider, max 500           |
 
-Binaries are resolved from known locations (including `~/.local/bin`) and absolute entries in the inherited PATH. Shell startup files, functions and aliases are not executed. If your shell's `codex` is a dashboard function, resume uses the actual Codex executable rather than that function. Set an executable wrapper's absolute path explicitly if you want that behavior.
+Binaries resolve from known locations (including `~/.local/bin`) and absolute PATH entries. Shell startup files, functions and aliases are not run. If `codex` is a shell function, resume uses the real executable; set a wrapper's absolute path to override.
 
 ## Security and privacy
 
-The extension reads session history and Zed workspace metadata locally. It does not upload transcripts, read authentication files/private keys/`.env` files, modify agent settings, install hooks, or write to the source databases. Session files are external input: UUIDs are validated, executables are resolved, and shell arguments are quoted individually. Codex transcript previews also validate that the resolved file remains inside a session store.
+Nothing is uploaded. The extension does not read auth files, private keys or `.env` files, change agent settings, install hooks, or write to source databases. Session files are treated as untrusted input: UUIDs are validated, executables resolved, each shell argument quoted, and Codex transcript paths must stay inside a session store. Only explicit copy actions touch the clipboard; clipboard managers may keep the command. No simulated keystrokes or automatic paste are used for Zed.
 
-Only explicit copy actions change the clipboard; copied commands remain there for you to paste. Clipboard managers may retain them. No simulated keystrokes or automatic clipboard paste are used for Zed. Source errors are reported without logging transcript bodies.
+Raycast needs two macOS permissions: **Accessibility**, to read and raise windows, and **Automation**, to control System Events, Terminal, iTerm2 and Zed (macOS asks the first time each is used). If a jump says it could not read the editor's windows, check both under System Settings > Privacy & Security. Permission granted to a terminal does not carry over.
 
-macOS Accessibility access for **Raycast** is required for window menus and selection. Permission granted to a terminal or another app does not grant it to Raycast.
-
-## Development and verification
+## Development
 
 ```sh
 npm install
@@ -99,15 +109,19 @@ npm run format:check
 npm run dev
 ```
 
-Tests compile with TypeScript and use Node's built-in test runner. Synthetic fixtures cover command injection boundaries, provider identity collisions, exact-path ownership, read-only SQLite catalogs, fallback discovery, and ambiguous Zed targets. `npm run build` writes the installed development bundle under Raycast's extension directory.
+Tests use TypeScript and Node's built-in runner with synthetic fixtures. Modules that call AppleScript are loaded with a fake `runAppleScript` through `tests/helpers/load-lib.ts`, so no test touches a real window. `npm run lint` runs Raycast's manifest checks, ESLint and Prettier. CI (`.github/workflows/ci.yml`) runs type check, lint, format check, tests and build on a macOS runner.
 
-See [verification notes](docs/verification.md) and [Zed integration limits](docs/zed-integration.md) for what was checked and what requires GUI testing.
+A manual real-device check lives in `tests/gui/`: `ZED_GUI_TEST=1 npm run test:gui` (add `-- spaces` for the fullscreen check). It raises your existing Zed windows and opens and closes disposable `ztq-` windows, so it refuses to run without the variable and is never part of `npm test` or CI. See its header for what it touches.
+
+`tsc` is TypeScript 7 (`@typescript/native`). The `typescript` package is aliased to `@typescript/typescript6` because typescript-eslint does not support TypeScript 7 yet. Drop the alias once it does.
+
+Regenerate the diagrams with `uv run --with graphviz --python 3.12 docs/render_diagrams.py` (needs the Graphviz binaries). See [verification notes](docs/verification.md) and [Zed integration limits](docs/zed-integration.md).
 
 ## References
 
-- [PromptCast](https://github.com/raycast/extensions/tree/6bc5707602cfa3506e557e0677f14e216a8fafe7/extensions/codex-claude-cli): provider-specific commands and Zed Terminal Thread workflow; its fixed-delay input automation is not used here.
-- [Codex Sessions](https://github.com/raycast/extensions/tree/353e21d9404a329d21bf75a6efea6149f179b75b/extensions/codex-sessions): read-only catalog and bounded rollout fallback.
-- [Perch](https://github.com/ReScienceLab/Perch): agent-independent session identity and resume concepts.
-- [Agent Sessions](https://github.com/jazzyalex/agent-sessions): source separation and incremental indexing concepts.
+Design references only; no source is copied.
 
-This implementation uses those projects as design references; it does not incorporate their source files. Existing generated architecture images describe the earlier Claude-only implementation and are not current specifications.
+- [PromptCast](https://github.com/raycast/extensions/tree/6bc5707602cfa3506e557e0677f14e216a8fafe7/extensions/codex-claude-cli): provider commands and Zed Terminal Thread flow. Its fixed-delay input automation is not used.
+- [Codex Sessions](https://github.com/raycast/extensions/tree/353e21d9404a329d21bf75a6efea6149f179b75b/extensions/codex-sessions): read-only catalog and bounded rollout fallback.
+- [Perch](https://github.com/ReScienceLab/Perch): agent-independent session identity and resume.
+- [Agent Sessions](https://github.com/jazzyalex/agent-sessions): source separation and incremental indexing.
