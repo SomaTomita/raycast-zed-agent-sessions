@@ -9,11 +9,14 @@
     "Developer Tools"
   ],
   "license": "MIT",
+  "platforms": [
+    "macOS"
+  ],
   "commands": [
     {
       "name": "sessions",
       "title": "Coding Agent Sessions",
-      "subtitle": "Zed \u00b7 Claude & Codex",
+      "subtitle": "Zed · Claude & Codex",
       "description": "Search local Claude and Codex sessions, focus a project window, or copy a resume command.",
       "mode": "view"
     }
@@ -90,6 +93,7 @@
     "lint": "ray lint",
     "fix-lint": "ray lint --fix",
     "test": "tsc -p tsconfig.test.json && node --test .test-dist/tests/*.test.js",
+    "test:gui": "tsc -p tsconfig.test.json && node .test-dist/tests/gui/zed.gui.js",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"tests/**/*.ts\""
   },
   "dependencies": {
@@ -97,9 +101,12 @@
     "@raycast/utils": "^2.3.0"
   },
   "devDependencies": {
+    "@raycast/eslint-config": "^2.2.0",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "eslint": "^10.13.0",
     "prettier": "^3.9.10",
-    "typescript": "^7.0.2"
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
   }
 }

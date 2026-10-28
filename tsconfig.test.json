@@ -5,5 +5,5 @@
     "outDir": ".test-dist",
     "noEmit": false
   },
-  "include": ["tests/**/*.ts", "src/lib/**/*.ts"]
+  "include": ["tests/**/*.ts", "src/lib/**/*.ts", "src/components/session-actions.tsx"]
 }
