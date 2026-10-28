@@ -41,7 +41,7 @@ export function containsProject(cwd: string, project: string): boolean {
   return cwd === project || cwd.startsWith(project.endsWith("/") ? project : `${project}/`);
 }
 
-export function windowRoots(title: string): string[] {
+function windowRoots(title: string): string[] {
   return title
     .split(" — ")[0]
     .split(", ")

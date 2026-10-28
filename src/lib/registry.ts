@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 import { agentStatusOf } from "./agents";
 import { detectHost, HostInfo, HostKind, readProcessTable } from "./host";
-import { isMissingOrDenied, REGISTRY_DIR } from "./paths";
+import { REGISTRY_DIR } from "./paths";
+import { isSameProcess, readProcessAges } from "./process-age";
 
 /** Status string written by Claude Code itself. Known values: "busy", "idle", "shell". */
 export type RegistryStatus = string;
@@ -168,7 +169,10 @@ export async function readLiveSessions(): Promise<LiveSession[]> {
     }),
   );
 
-  const sessions = parsed.filter((session): session is LiveSession => session !== null && isAlive(session.pid));
+  const alive = parsed.filter((session): session is LiveSession => session !== null && isAlive(session.pid));
+  const ages = alive.length > 0 ? await readProcessAges() : new Map<number, number>();
+  const now = Date.now();
+  const sessions = alive.filter((session) => isSameProcess(session.startedAt, ages.get(session.pid), now));
   // Keyed on the pid inside the file, which `parseRegistryFile` prefers over the filename.
   const hosts = await resolveHosts(sessions.map((session) => session.pid));
 
@@ -187,8 +191,12 @@ export async function readLiveSessions(): Promise<LiveSession[]> {
             };
 
       // The CLI knows about `waiting` and why; the registry file only carries busy/idle/shell.
+      // Its answer is cached, so it only wins while nothing has changed since it was read, and only
+      // for the same session: a status written after the read, or a reused pid, must not be hidden.
       const fromCli = agentStatusOf(session.pid);
-      return fromCli === null
+      const cliIsCurrent =
+        fromCli !== null && fromCli.sessionId === session.sessionId && fromCli.readAt >= (session.statusUpdatedAt ?? 0);
+      return fromCli === null || !cliIsCurrent
         ? withHost
         : {
             ...withHost,

@@ -170,7 +170,7 @@ async function forEachLine(path: string, onLine: (line: string) => void): Promis
 }
 
 /** Reads one transcript and pulls out the fields the list needs. Tolerates malformed lines. */
-export async function summarizeTranscript(file: TranscriptFile): Promise<TranscriptSummary> {
+async function summarizeTranscript(file: TranscriptFile): Promise<TranscriptSummary> {
   let aiTitle = "";
   let cwd = "";
   let gitBranch = "";
@@ -258,7 +258,7 @@ const summaryCache = new Map<
 >();
 
 /** Memoised per path+mtime: re-reading unchanged transcripts on every refresh is the slow part. */
-export async function summarizeTranscriptCached(file: TranscriptFile): Promise<TranscriptSummary> {
+async function summarizeTranscriptCached(file: TranscriptFile): Promise<TranscriptSummary> {
   const cached = summaryCache.get(file.path);
   if (cached !== undefined && cached.mtimeMs === file.mtimeMs && cached.sizeBytes === file.sizeBytes) {
     return cached.summary;

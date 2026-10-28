@@ -35,6 +35,10 @@ export type Agent = InteractiveAgent | BackgroundAgent;
 export interface AgentStatus {
   readonly status: string;
   readonly waitingFor: string;
+  /** The session the CLI reported for this pid, so a reused pid is not mistaken for it. */
+  readonly sessionId: string;
+  /** When the CLI was asked, so a newer registry status can be told apart from this one. */
+  readonly readAt: number;
 }
 
 /** pid -> status, so the 3s registry poll can show `waiting` without paying for a CLI call. */
@@ -130,17 +134,20 @@ export async function readAgents(preferredBinary?: string): Promise<Agent[]> {
 
   const agents = parsed.map(parseAgent).filter((agent): agent is Agent => agent !== null);
 
+  const readAt = Date.now();
   statusByPid.clear();
   for (const agent of agents) {
     if (agent.kind === "interactive") {
       statusByPid.set(agent.pid, {
         status: agent.status,
         waitingFor: agent.waitingFor,
+        sessionId: agent.sessionId,
+        readAt,
       });
     }
   }
 
-  cached = { at: Date.now(), agents };
+  cached = { at: readAt, agents };
   return agents;
 }
 

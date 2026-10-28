@@ -27,10 +27,13 @@ export async function resolveBinary(provider: ProviderId, preferred: string = pr
       ];
   for (const candidate of candidates) {
     try {
+      // The link is checked through to its target but returned as found. Installers point
+      // `~/.local/bin/claude` at a versioned file and delete old versions on update, so a command
+      // that pinned the target would stop working after the next upgrade.
       const path = await realpath(candidate);
       if (!(await stat(path)).isFile()) continue;
       await access(path, constants.X_OK);
-      return path;
+      return candidate;
     } catch {
       // Explicit paths never silently select another binary.
     }

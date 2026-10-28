@@ -68,7 +68,7 @@ export async function readProcessTable(): Promise<Map<number, ProcessRow>> {
 }
 
 /** Application name of a process: the `.app` bundle name when present, else the binary name. */
-export function appNameOf(command: string): string {
+function appNameOf(command: string): string {
   const bundle = command.match(/\/([^/]+)\.app\//);
   return bundle !== null ? bundle[1] : basename(command);
 }
@@ -77,9 +77,13 @@ export function appNameOf(command: string): string {
  * Whether a process looks like a GUI terminal or editor hosting a session: anything inside an
  * `.app` bundle, plus bare binaries of known terminals. Broader than the list of apps we can
  * script, on purpose, so an unrecognised host still gets activated rather than ignored.
+ *
+ * An `.app` inside a `.framework` is a runtime, not something a user can switch to. Homebrew's
+ * `Python.app` is the usual case: a Python wrapper around a CLI must not be mistaken for its host.
  */
 function isGuiHost(command: string): boolean {
-  return command.includes(".app/") || BARE_TERMINALS.test(basename(command));
+  const inBundle = command.includes(".app/") && !command.includes(".framework/");
+  return inBundle || BARE_TERMINALS.test(basename(command));
 }
 
 /** Walks the parent chain until it reaches a GUI application. */

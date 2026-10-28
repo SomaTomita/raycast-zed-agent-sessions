@@ -65,7 +65,7 @@ end tell`);
 export type WindowSnapshot =
   { readonly kind: "available"; readonly titles: string[] } | { readonly kind: "unavailable" };
 
-export async function readWindowTitles(processName: string): Promise<WindowSnapshot> {
+async function readWindowTitles(processName: string): Promise<WindowSnapshot> {
   try {
     const fromMenu = await listMenuWindowTitles(processName);
     if (fromMenu.length > 0) {
@@ -101,9 +101,12 @@ export async function listWindowTitles(processName: string): Promise<string[]> {
   return snapshot.kind === "available" ? snapshot.titles : [];
 }
 
-/** Every project root currently shown by that application's windows. */
-export async function listProjectRoots(processName: string): Promise<Set<string>> {
-  return new Set((await listWindowTitles(processName)).flatMap(rootsOf));
+/**
+ * Whether the window list could be read at all. An unreadable list looks like an empty one to
+ * `listWindowTitles`, but it means Raycast lacks Accessibility permission, not that no window exists.
+ */
+export async function windowsReadable(processName: string): Promise<boolean> {
+  return (await readWindowTitles(processName)).kind === "available";
 }
 
 /** Project roots a window title claims, e.g. `api, web — main.ts` -> both names. */
@@ -152,7 +155,7 @@ export async function focusProjectWindow(
 export async function focusWindowTitle(processName: string, title: string, hostPid = 0): Promise<boolean> {
   if ((await listWindowTitles(processName)).filter((entry) => entry === title).length !== 1) return false;
 
-  const nativePid = processName === "zed" ? await zedPid() : null;
+  const nativePid = processName === "zed" ? await zedPid().catch(() => null) : null;
   if (nativePid !== null) {
     try {
       if ((await inspectZedWindows(nativePid, title)).reached) return true;
@@ -200,11 +203,24 @@ end tell`);
   if (clicked.trim() !== "ok") return false;
   if (processName === "zed") {
     if (nativePid === null) return false;
+    return waitForFocus(nativePid, title);
+  }
+  return true;
+}
+
+/** Switching to a window on another Space animates, so the focused title is right a moment after the click. */
+const FOCUS_WAIT_MS = 2_000;
+const FOCUS_POLL_MS = 150;
+
+async function waitForFocus(pid: number, title: string): Promise<boolean> {
+  const deadline = Date.now() + FOCUS_WAIT_MS;
+  for (;;) {
     try {
-      return (await inspectZedWindows(nativePid)).focused === title;
+      if ((await inspectZedWindows(pid)).focused === title) return true;
     } catch {
       return false;
     }
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, FOCUS_POLL_MS));
   }
-  return true;
 }

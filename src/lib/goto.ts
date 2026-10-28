@@ -1,5 +1,5 @@
 import { activateProcess } from "./activate";
-import { focusItermTab, focusTerminalTab, raiseProjectWindow } from "./focus";
+import { canListWindows, focusItermTab, focusTerminalTab, raiseProjectWindow } from "./focus";
 import { SessionItem } from "./sessions";
 import { isInsideOpenProject, readOpenZedProjects } from "./zed-workspaces";
 
@@ -65,6 +65,15 @@ export async function goToSession(item: SessionItem, options: GoToOptions = {}):
         title: `Moved to the ${live.hostApp} window`,
         message: `${live.name} · ${live.tty || "unknown tty"}`,
       };
+    }
+
+    // An unreadable window list is a permission problem, not proof that no window shows the project.
+    if (!(await canListWindows(live.hostApp))) {
+      return activateHost(
+        live.hostPid,
+        live.hostApp,
+        "Could not read the editor's windows; check that Raycast has Accessibility permission",
+      );
     }
 
     // The window list can miss a project that is open as a second workspace inside another window.

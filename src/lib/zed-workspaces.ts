@@ -51,7 +51,7 @@ export async function readZedSnapshot(): Promise<ZedSnapshot> {
   }
 }
 
-/** Compatibility helper; navigation uses the explicit snapshot result instead. */
+/** Every path of every local Zed window, or none when the snapshot is unavailable. Used only to explain a missing window. */
 export async function readOpenZedProjects(): Promise<string[]> {
   const snapshot = await readZedSnapshot();
   return snapshot.kind === "available" ? snapshot.workspaces.flatMap((workspace) => [...workspace.paths]) : [];

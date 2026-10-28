@@ -37,7 +37,7 @@ const EDITOR_PROCESS: Record<string, string> = {
   Cursor: "Cursor",
 };
 
-export function resolveEditorCli(appName: string): string | null {
+function resolveEditorCli(appName: string): string | null {
   return (EDITOR_CLIS[appName] ?? []).find((path) => existsSync(path)) ?? null;
 }
 
@@ -50,7 +50,7 @@ export function editorLabel(appName: string): string {
 }
 
 /** Brings the editor to the front without touching any window or project. */
-export async function activateEditor(appName: string): Promise<void> {
+async function activateEditor(appName: string): Promise<void> {
   await runAppleScript(`tell application ${appleQuote(appName)} to activate`);
 }
 

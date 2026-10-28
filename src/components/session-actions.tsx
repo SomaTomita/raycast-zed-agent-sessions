@@ -1,4 +1,4 @@
-import { Action, ActionPanel, Clipboard, Icon, showToast, Toast } from "@raycast/api";
+import { Action, ActionPanel, Clipboard, Icon, showToast, Toast, Keyboard } from "@raycast/api";
 import { showFailureToast } from "@raycast/utils";
 
 import { editorLabel, openProjectInNewWindow } from "../lib/editor";
@@ -43,32 +43,62 @@ export function SessionActions({
   const preferred = item.provider === "codex" ? codexBin : claudeBin;
   const terminalLabel = terminal === "iTerm" ? "iTerm2" : "Terminal";
 
-  async function copyCommand() {
+  /** `quiet` skips the success toast when the caller reports the copy together with its own result. */
+  async function copyCommand(quiet = false): Promise<boolean> {
     try {
       if (!item.resumable) throw new Error("CLI resume has not been verified for this session source");
       await Clipboard.copy(await resumeCommand(item, preferred));
-      await showToast({
-        style: Toast.Style.Success,
-        title: "Copied resume command",
-        message: "Paste it in the project's Zed terminal; avoid resuming a session that is already running",
-      });
+      if (!quiet) {
+        await showToast({
+          style: Toast.Style.Success,
+          title: "Copied resume command",
+          message: "Paste it in the project's Zed terminal; avoid resuming a session that is already running",
+        });
+      }
+      return true;
     } catch (error) {
       await showFailureToast(error, { title: "Could not copy resume command" });
+      return false;
     }
   }
 
-  async function openEditor() {
+  /** `copied` is set when the resume command is already in the clipboard, so both outcomes say so. */
+  async function openEditor(copied = false) {
     try {
       const reused = await revealProject(editor, item.cwd, item.live?.hostKind === "editor" ? item.live.hostPid : 0);
       await showToast({
         style: Toast.Style.Success,
         title: reused ? `Moved to ${editorLabel(editor)} project` : `Opened new ${editorLabel(editor)} window`,
-        message: "Project window only; no terminal command was sent",
+        message: copied
+          ? "Resume command copied; paste it in the project's terminal"
+          : "Project window only; no terminal command was sent",
       });
     } catch (error) {
       await showFailureToast(error, {
-        title: "Could not identify a unique project window",
+        title: copied
+          ? "Resume command copied, but no unique project window was found"
+          : "Could not identify a unique project window",
       });
+    }
+  }
+
+  async function openInNewWindow() {
+    try {
+      await openProjectInNewWindow(editor, item.cwd);
+    } catch (error) {
+      await showFailureToast(error, { title: "Could not open project" });
+    }
+  }
+
+  /** A second press while a window action is still running is ignored, so one Enter opens one window. */
+  async function once(task: () => Promise<void>) {
+    const key = `window:${sessionKey(item.provider, item.sessionId)}`;
+    if (pending.has(key)) return;
+    pending.add(key);
+    try {
+      await task();
+    } finally {
+      pending.delete(key);
     }
   }
 
@@ -91,8 +121,8 @@ export function SessionActions({
       return;
     }
     // Copy first: lookup failure leaves a useful command without injecting it anywhere.
-    if (item.resumable) await copyCommand();
-    await openEditor();
+    const copied = item.resumable && (await copyCommand(true));
+    await openEditor(copied);
   }
 
   async function explicitTerminalResume() {
@@ -100,7 +130,8 @@ export function SessionActions({
     if (pending.has(key)) return;
     pending.add(key);
     try {
-      if (!item.resumable || item.live || item.state === "unknown")
+      // A background job has no process or registry file, so the liveness checks below cannot see it.
+      if (!item.resumable || item.live || item.agent !== null || item.state === "unknown")
         throw new Error("Session is running or its ownership is unknown; automatic resume was blocked");
       if (item.provider === "claude") {
         if ((await readLiveSessions()).some((live) => live.sessionId === item.sessionId))
@@ -166,14 +197,14 @@ export function SessionActions({
                   : `Open Project in ${editorLabel(editor)}`
             }
             icon={Icon.AppWindow}
-            onAction={primary}
+            onAction={() => once(primary)}
           />
         )}
         <Action
           title={`Move to ${editorLabel(editor)} Project`}
           icon={Icon.Code}
-          shortcut={{ modifiers: ["cmd"], key: "e" }}
-          onAction={openEditor}
+          shortcut={Keyboard.Shortcut.Common.Edit}
+          onAction={() => once(() => openEditor())}
         />
         {editor === "Zed" ? (
           <Action.Push title="Choose Zed Window" icon={Icon.AppWindow} target={<ZedWindowPicker />} />
@@ -181,15 +212,7 @@ export function SessionActions({
         <Action
           title={`Open Project in New ${editorLabel(editor)} Window`}
           icon={Icon.Plus}
-          onAction={async () => {
-            try {
-              await openProjectInNewWindow(editor, item.cwd);
-            } catch (error) {
-              await showFailureToast(error, {
-                title: "Could not open project",
-              });
-            }
-          }}
+          onAction={() => once(openInNewWindow)}
         />
         {item.transcript ? (
           <Action.Push
@@ -211,17 +234,17 @@ export function SessionActions({
           <Action
             title="Copy Resume Command"
             icon={Icon.CopyClipboard}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
-            onAction={copyCommand}
+            shortcut={Keyboard.Shortcut.Common.Copy}
+            onAction={() => copyCommand()}
           />
         ) : null}
-        {item.resumable && !item.live && item.state !== "unknown" ? (
+        {item.agent === null && item.resumable && !item.live && item.state !== "unknown" ? (
           <Action title={`Resume in ${terminalLabel}`} icon={Icon.Terminal} onAction={explicitTerminalResume} />
         ) : null}
         <Action.CopyToClipboard
           title="Copy Session ID"
           content={item.sessionId}
-          shortcut={{ modifiers: ["cmd"], key: "." }}
+          shortcut={Keyboard.Shortcut.Common.Pin}
         />
         {item.cwd ? <Action.CopyToClipboard title="Copy Directory Path" content={item.cwd} /> : null}
         {item.cwd ? <Action.ShowInFinder title="Open Project Folder" path={item.cwd} /> : null}
@@ -229,7 +252,7 @@ export function SessionActions({
         <Action
           title="Refresh"
           icon={Icon.ArrowClockwise}
-          shortcut={{ modifiers: ["cmd"], key: "r" }}
+          shortcut={Keyboard.Shortcut.Common.Refresh}
           onAction={onRefresh}
         />
       </ActionPanel.Section>
