@@ -32,6 +32,7 @@ interface Preferences {
   readonly claudeBin?: string;
   readonly codexBin?: string;
   readonly historyLimit?: string;
+  readonly zedTerminalPrefill?: boolean;
 }
 
 async function preview(provider: ProviderId, path: string) {
@@ -46,6 +47,7 @@ export default function Command() {
   const editor = preferences.editorApp?.trim() || "Zed";
   const claudeBin = preferences.claudeBin?.trim() || "claude";
   const codexBin = preferences.codexBin?.trim() || "codex";
+  const zedTerminalPrefill = preferences.zedTerminalPrefill === true;
   const [showDetail, setShowDetail] = useState(false);
   const [provider, setProvider] = useState("all");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -245,6 +247,7 @@ export default function Command() {
                     editor={editor}
                     claudeBin={claudeBin}
                     codexBin={codexBin}
+                    zedTerminalPrefill={zedTerminalPrefill}
                     onRefresh={refresh}
                     onToggleDetail={toggle}
                     filters={filters}

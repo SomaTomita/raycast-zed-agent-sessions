@@ -8,6 +8,7 @@ import { readLiveSessions } from "../lib/registry";
 import { readCodexRuntime } from "../lib/codex-live";
 import { CodexRecord } from "../lib/codex-records";
 import { resumeCommand, resumeInTerminal, TerminalApp } from "../lib/resume";
+import { PrefillResult, prefillZedTerminal } from "../lib/zed-terminal";
 import { providerLabel, sessionKey } from "../lib/session-types";
 import { resolveBinary } from "../lib/binary";
 import { shellQuote } from "../lib/quote";
@@ -22,6 +23,8 @@ interface Props {
   readonly editor: string;
   readonly claudeBin: string;
   readonly codexBin: string;
+  /** Experimental, off by default: also type the resume command into a new Zed terminal. */
+  readonly zedTerminalPrefill?: boolean;
   readonly onRefresh: () => void;
   readonly onToggleDetail: () => void;
   readonly filters: FilterProps;
@@ -36,6 +39,7 @@ export function SessionActions({
   editor,
   claudeBin,
   codexBin,
+  zedTerminalPrefill = false,
   onRefresh,
   onToggleDetail,
   filters,
@@ -43,11 +47,15 @@ export function SessionActions({
   const preferred = item.provider === "codex" ? codexBin : claudeBin;
   const terminalLabel = terminal === "iTerm" ? "iTerm2" : "Terminal";
 
-  /** `quiet` skips the success toast when the caller reports the copy together with its own result. */
-  async function copyCommand(quiet = false): Promise<boolean> {
+  /**
+   * Copies the resume command and returns it, or null when it could not be copied.
+   * `quiet` skips the success toast when the caller reports the copy together with its own result.
+   */
+  async function copyCommand(quiet = false): Promise<string | null> {
     try {
       if (!item.resumable) throw new Error("CLI resume has not been verified for this session source");
-      await Clipboard.copy(await resumeCommand(item, preferred));
+      const command = await resumeCommand(item, preferred);
+      await Clipboard.copy(command);
       if (!quiet) {
         await showToast({
           style: Toast.Style.Success,
@@ -55,23 +63,43 @@ export function SessionActions({
           message: "Paste it in the project's Zed terminal; avoid resuming a session that is already running",
         });
       }
-      return true;
+      return command;
     } catch (error) {
       await showFailureToast(error, { title: "Could not copy resume command" });
-      return false;
+      return null;
     }
   }
 
-  /** `copied` is set when the resume command is already in the clipboard, so both outcomes say so. */
-  async function openEditor(copied = false) {
+  /** Never throws: any doubt means the command stays on the clipboard for a manual paste. */
+  async function typeIntoZedTerminal(command: string): Promise<PrefillResult> {
+    try {
+      return await prefillZedTerminal({ cwd: item.cwd, command });
+    } catch (error) {
+      return { kind: "skipped", reason: error instanceof Error ? error.message : "an unexpected error" };
+    }
+  }
+
+  /**
+   * `command` is the resume command already on the clipboard, so both outcomes say so. With the
+   * experimental setting on, it is also pasted (never run) into a new terminal in the Zed window.
+   */
+  async function openEditor(command: string | null = null) {
+    const copied = command !== null;
     try {
       const reused = await revealProject(editor, item.cwd, item.live?.hostKind === "editor" ? item.live.hostPid : 0);
+      const typed =
+        command !== null && zedTerminalPrefill && editor === "Zed" ? await typeIntoZedTerminal(command) : null;
       await showToast({
         style: Toast.Style.Success,
         title: reused ? `Moved to ${editorLabel(editor)} project` : `Opened new ${editorLabel(editor)} window`,
-        message: copied
-          ? "Resume command copied; paste it in the project's terminal"
-          : "Project window only; no terminal command was sent",
+        message:
+          typed?.kind === "typed"
+            ? "Typed into a new Zed terminal; press Enter there to run it"
+            : typed?.kind === "skipped"
+              ? `Resume command copied; paste it in the project's terminal (not typed: ${typed.reason})`
+              : copied
+                ? "Resume command copied; paste it in the project's terminal"
+                : "Project window only; no terminal command was sent",
       });
     } catch (error) {
       await showFailureToast(error, {
@@ -121,8 +149,8 @@ export function SessionActions({
       return;
     }
     // Copy first: lookup failure leaves a useful command without injecting it anywhere.
-    const copied = item.resumable && (await copyCommand(true));
-    await openEditor(copied);
+    const command = item.resumable ? await copyCommand(true) : null;
+    await openEditor(command);
   }
 
   async function explicitTerminalResume() {

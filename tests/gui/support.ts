@@ -64,3 +64,49 @@ export function report(): Report {
     summary: () => ({ passed: results.filter(Boolean).length, failed: results.filter((ok) => !ok).length }),
   };
 }
+
+/** Test only: the product never sends Return. This lets a test run what was typed, to prove it was typed. */
+export function pressReturn(pid: number): Promise<void> {
+  const script = `ObjC.import("ApplicationServices");
+function run(argv) {
+  for (const down of [true, false]) {
+    const event = $.CGEventCreateKeyboardEvent($(), 36, down);
+    $.CGEventPostToPid(Number(argv[0]), event);
+    delay(0.04);
+  }
+}`;
+  return new Promise((done, fail) =>
+    execFile("/usr/bin/osascript", ["-l", "JavaScript", "-e", script, String(pid)], (error) =>
+      error ? fail(error) : done(),
+    ),
+  );
+}
+
+/** How many terminals Zed has started, counted as `login` processes under the Zed process. */
+export function zedTerminalCount(pid: number): Promise<number> {
+  return new Promise((done, fail) =>
+    execFile("/bin/ps", ["-axo", "pid=,ppid=,comm="], (error, stdout) =>
+      error
+        ? fail(error)
+        : done(
+            stdout
+              .split("\n")
+              .map((line) => line.trim().split(/\s+/))
+              .filter((cols) => Number(cols[1]) === pid && (cols[2] ?? "").endsWith("/login")).length,
+          ),
+    ),
+  );
+}
+
+export function readClipboard(): Promise<string> {
+  return new Promise((done, fail) =>
+    execFile("/usr/bin/pbpaste", (error, stdout) => (error ? fail(error) : done(stdout))),
+  );
+}
+
+export function writeClipboard(text: string): Promise<void> {
+  return new Promise((done, fail) => {
+    const child = execFile("/usr/bin/pbcopy", (error) => (error ? fail(error) : done()));
+    child.stdin?.end(text);
+  });
+}

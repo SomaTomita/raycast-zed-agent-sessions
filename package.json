@@ -85,6 +85,15 @@
       "type": "textfield",
       "required": false,
       "default": "80"
+    },
+    {
+      "name": "zedTerminalPrefill",
+      "title": "Zed Terminal (experimental)",
+      "label": "Type the resume command into a new Zed terminal",
+      "description": "Off by default. When on, Enter on a history row also opens a new terminal in the project's Zed window and pastes the resume command without running it. It sends Ctrl+Shift+` and Cmd+V to Zed after checking the window, the new terminal and the clipboard; if any check fails, the command is only copied.",
+      "type": "checkbox",
+      "required": false,
+      "default": false
     }
   ],
   "scripts": {

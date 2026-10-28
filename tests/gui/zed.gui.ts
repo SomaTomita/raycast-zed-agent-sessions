@@ -3,15 +3,18 @@
  *
  *   ZED_GUI_TEST=1 npm run test:gui            window navigation
  *   ZED_GUI_TEST=1 npm run test:gui -- spaces  also the fullscreen (own Space) check
+ *   ZED_GUI_TEST=1 npm run test:gui -- terminal  also the "type into a new Zed terminal" check
  *
  * What it touches on your machine:
  * - It raises each of your existing Zed windows once, then returns focus to where it started.
  * - It opens a few disposable Zed windows whose folder names start with `ztq-`, in a temp directory,
  *   and closes only those. It refuses to start if a `ztq-` window is already open.
  * - The `spaces` check puts one disposable window into native fullscreen and switches Spaces.
+ * - The `terminal` check opens a terminal in a disposable window, types `touch <file>` into it, then presses
+ *   Return itself to prove the text was typed there. It replaces your clipboard and restores it afterwards.
  * It needs Zed running, and Accessibility and Automation permission for the terminal you run it from.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -20,8 +23,21 @@ import type * as FocusModule from "../../src/lib/focus";
 import type * as NativeZedModule from "../../src/lib/native-zed";
 import type * as WindowsModule from "../../src/lib/windows";
 import type * as ZedTargetsModule from "../../src/lib/zed-targets";
+import type * as ZedTerminalModule from "../../src/lib/zed-terminal";
 import type * as ZedWorkspacesModule from "../../src/lib/zed-workspaces";
-import { installRaycastShim, lib, osascript, report, sleep, until, type Report } from "./support";
+import {
+  installRaycastShim,
+  lib,
+  osascript,
+  pressReturn,
+  readClipboard,
+  report,
+  sleep,
+  type Report,
+  until,
+  writeClipboard,
+  zedTerminalCount,
+} from "./support";
 
 const PREFIX = "ztq-";
 
@@ -44,6 +60,7 @@ const { openProjectInNewWindow } = lib<typeof EditorModule>("editor");
 const { inspectZedWindows, zedPid } = lib<typeof NativeZedModule>("native-zed");
 const { readZedSnapshot } = lib<typeof ZedWorkspacesModule>("zed-workspaces");
 const { resolveZedTarget } = lib<typeof ZedTargetsModule>("zed-targets");
+const { prefillZedTerminal } = lib<typeof ZedTerminalModule>("zed-terminal");
 
 const titles = (): Promise<string[]> => listWindowTitles("zed");
 
@@ -269,6 +286,40 @@ async function spaces(out: Report, pid: number, base: readonly string[], scratch
   if (existing.length === 0) out.note("SKIP  no uniquely resolvable existing project to switch away to");
 }
 
+async function terminal(out: Report, pid: number, scratch: string): Promise<void> {
+  const project = join(scratch, `${PREFIX}term`);
+  mkdirSync(project, { recursive: true });
+  const marker = join(scratch, "typed-marker");
+  const command = `touch ${marker}`;
+  const savedClipboard = await readClipboard();
+  try {
+    // The same order the product follows: copy, reveal the window, then type.
+    await writeClipboard(command);
+    await revealProject("Zed", project, pid);
+    const result = await prefillZedTerminal({ cwd: project, command });
+    out.check("the command is typed into a new terminal", result.kind === "typed", JSON.stringify(result));
+    await sleep(800);
+    out.check("nothing ran: the product never presses Return", !existsSync(marker));
+    if (result.kind === "typed") {
+      await pressReturn(pid); // test only
+      await sleep(1_500);
+      out.check("pressing Return runs exactly what was typed", existsSync(marker));
+    }
+
+    // A clipboard that no longer matches must be refused before any key is sent.
+    const terminalsBefore = await zedTerminalCount(pid);
+    await writeClipboard("not the command");
+    const refused = await prefillZedTerminal({ cwd: project, command });
+    out.check(
+      "a clipboard that differs is refused and opens no terminal",
+      refused.kind === "skipped" && (await zedTerminalCount(pid)) === terminalsBefore,
+      JSON.stringify(refused),
+    );
+  } finally {
+    await writeClipboard(savedClipboard);
+  }
+}
+
 async function main(): Promise<number> {
   const pid = await zedPid();
   if (pid === null) throw new Error("Zed is not running, or more than one Zed process is");
@@ -281,6 +332,7 @@ async function main(): Promise<number> {
   }
 
   const withSpaces = process.argv.slice(2).includes("spaces");
+  const withTerminal = process.argv.slice(2).includes("terminal");
   const originalFocus = await focused();
   // Zed records real paths, and the temp directory is reached through a symlink (/var -> /private/var).
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), "zed-gui-test-")));
@@ -290,6 +342,7 @@ async function main(): Promise<number> {
   try {
     await navigation(out, pid, base, scratch);
     if (withSpaces) await spaces(out, pid, base, scratch);
+    if (withTerminal) await terminal(out, pid, scratch);
   } finally {
     await cleanup(pid);
     await sleep(1_500);

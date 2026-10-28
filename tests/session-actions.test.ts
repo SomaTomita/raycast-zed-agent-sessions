@@ -24,6 +24,7 @@ interface Harness {
   readonly revealed: unknown[][];
   readonly newWindows: unknown[][];
   readonly resumed: unknown[][];
+  readonly prefillCalls: unknown[];
   readonly press: (title: string) => Promise<void>;
   readonly titles: () => string[];
 }
@@ -36,6 +37,10 @@ interface Options {
   /** Session ids the Claude registry reports as running. */
   readonly runningClaude?: readonly string[];
   readonly codexRuntime?: { readonly live: Map<string, unknown>; readonly uncertain: boolean };
+  /** The experimental setting, and what the terminal step answers (or throws). */
+  readonly zedTerminalPrefill?: boolean;
+  readonly prefill?: { kind: "typed" } | { kind: "skipped"; reason: string } | Error;
+  readonly editor?: string;
   /** Held by window actions until released, to model a slow Zed. */
   readonly gate?: Promise<void>;
 }
@@ -75,6 +80,7 @@ function setup(row: SessionItem, options: Options = {}): Harness {
   const revealed: unknown[][] = [];
   const newWindows: unknown[][] = [];
   const resumed: unknown[][] = [];
+  const prefillCalls: unknown[] = [];
 
   function Action() {
     return null;
@@ -159,6 +165,13 @@ function setup(row: SessionItem, options: Options = {}): Harness {
         resumed.push(args);
       },
     },
+    "../lib/zed-terminal": {
+      prefillZedTerminal: async (args: unknown) => {
+        prefillCalls.push(args);
+        if (options.prefill instanceof Error) throw options.prefill;
+        return options.prefill ?? { kind: "typed" };
+      },
+    },
     "../lib/binary": { resolveBinary: async () => "/bin/claude" },
     "../lib/session-types": realSessionTypes,
     "../lib/quote": realQuote,
@@ -170,7 +183,8 @@ function setup(row: SessionItem, options: Options = {}): Harness {
   const tree = module.SessionActions({
     item: row,
     terminal: "Terminal",
-    editor: "Zed",
+    editor: options.editor ?? "Zed",
+    zedTerminalPrefill: options.zedTerminalPrefill,
     claudeBin: "claude",
     codexBin: "codex",
     onRefresh: () => undefined,
@@ -186,6 +200,7 @@ function setup(row: SessionItem, options: Options = {}): Harness {
     revealed,
     newWindows,
     resumed,
+    prefillCalls,
     titles: () => actions.map((props) => String(props.title)),
     press: async (title) => {
       const props = actions.find((candidate) => candidate.title === title);
@@ -389,4 +404,90 @@ test("a second window action while one is running is ignored, whichever button s
   await Promise.all([move, fresh]);
   assert.equal(h.revealed.length, 1);
   assert.deepEqual(h.newWindows, []);
+});
+
+const TYPED_MESSAGE = "Typed into a new Zed terminal; press Enter there to run it";
+
+test("with the setting on, a history row also types the command into a new Zed terminal", async () => {
+  const h = setup(item({}), { reveal: true, zedTerminalPrefill: true });
+  await h.press(PRIMARY);
+  assert.deepEqual(h.clipboard, [COMMAND]);
+  assert.deepEqual(h.prefillCalls, [{ cwd: "/work/app", command: COMMAND }]);
+  assert.equal(h.toasts[0].title, "Moved to Zed project");
+  assert.equal(h.toasts[0].message, TYPED_MESSAGE);
+});
+
+test("a window that had to be opened gets the terminal too", async () => {
+  const h = setup(item({}), { reveal: false, zedTerminalPrefill: true });
+  await h.press(PRIMARY);
+  assert.equal(h.toasts[0].title, "Opened new Zed window");
+  assert.equal(h.toasts[0].message, TYPED_MESSAGE);
+});
+
+test("when the terminal step declines, the command is still copied and the reason is shown", async () => {
+  const h = setup(item({}), {
+    reveal: true,
+    zedTerminalPrefill: true,
+    prefill: { kind: "skipped", reason: "the clipboard changed" },
+  });
+  await h.press(PRIMARY);
+  assert.deepEqual(h.clipboard, [COMMAND]);
+  assert.equal(
+    h.toasts[0].message,
+    "Resume command copied; paste it in the project's terminal (not typed: the clipboard changed)",
+  );
+  assert.deepEqual(h.failures, []);
+});
+
+test("an unexpected error in the terminal step never becomes a failure", async () => {
+  const h = setup(item({}), { reveal: true, zedTerminalPrefill: true, prefill: new Error("boom") });
+  await h.press(PRIMARY);
+  assert.match(h.toasts[0].message ?? "", /not typed: boom/);
+  assert.deepEqual(h.failures, []);
+});
+
+test("with the setting off, no terminal step is attempted", async () => {
+  const h = setup(item({}), { reveal: true, zedTerminalPrefill: false });
+  await h.press(PRIMARY);
+  assert.deepEqual(h.prefillCalls, []);
+  assert.equal(h.toasts[0].message, "Resume command copied; paste it in the project's terminal");
+});
+
+test("the setting defaults to off", async () => {
+  const h = setup(item({}), { reveal: true });
+  await h.press(PRIMARY);
+  assert.deepEqual(h.prefillCalls, []);
+});
+
+test("another editor never gets the terminal step", async () => {
+  const h = setup(item({}), { reveal: true, zedTerminalPrefill: true, editor: "Visual Studio Code" });
+  await h.press("Open in Visual Studio Code and Copy Resume Command");
+  assert.deepEqual(h.prefillCalls, []);
+});
+
+test("a row that cannot be resumed has nothing to type", async () => {
+  const h = setup(item({ resumable: false }), { reveal: true, zedTerminalPrefill: true });
+  await h.press("Open Project in Zed");
+  assert.deepEqual(h.prefillCalls, []);
+});
+
+test("if the copy failed, nothing is typed", async () => {
+  const h = setup(item({}), { reveal: true, zedTerminalPrefill: true, resumeFails: true });
+  await h.press(PRIMARY);
+  assert.deepEqual(h.prefillCalls, []);
+});
+
+test("if no window can be found, the terminal step is not attempted", async () => {
+  const h = setup(item({}), { reveal: new Error("Several Zed projects match"), zedTerminalPrefill: true });
+  await h.press(PRIMARY);
+  assert.deepEqual(h.prefillCalls, []);
+  assert.equal(h.failures[0].title, "Resume command copied, but no unique project window was found");
+});
+
+test("a live session never types anything, whatever the setting", async () => {
+  const live = { hostKind: "unknown", hostApp: "", hostPid: 0, tty: "/dev/ttys009" };
+  const h = setup(item({ live }), { goTo: { kind: "needs-resume" }, reveal: true, zedTerminalPrefill: true });
+  await h.press("Go to Session Window");
+  assert.deepEqual(h.prefillCalls, []);
+  assert.deepEqual(h.clipboard, []);
 });
