@@ -31,7 +31,9 @@ Open Sessions have observed live ownership. History is everything else; it does 
 
 **Enter on a history row** copies the resume command, then reveals the project window. A new window (`zed --new`) opens only when no window matches. If the mapping is ambiguous or unavailable, the extension says so and keeps the command in the clipboard. It never hands a path to an existing Zed window, because that can swap its project and kill its terminals.
 
-**No automatic resume inside Zed.** Zed's CLI cannot target a terminal, and keystroke automation cannot reliably bind input to one. Paste the copied command into the right Zed terminal yourself, after checking the session is not already running.
+**By default nothing is typed into Zed.** Zed's CLI cannot target a terminal, so Enter only copies the command and raises the window. Paste it into a Zed terminal yourself, after checking the session is not already running.
+
+**Experimental, off by default: type it for you.** With the **Zed Terminal** preference on, Enter on a history row also opens a new terminal in that project's Zed window and pastes the resume command into it, without running it. You press Enter there. It sends exactly two key presses to the Zed process, Ctrl+Shift+` (Zed's default for a new terminal) and Cmd+V, and only after checking, in this order, that the command is one line, your Zed keymap does not mention Ctrl+Shift+`, the project's window is the focused one, the clipboard still holds the command, exactly one new terminal appeared, that terminal opened in the project's directory, and nothing changed meanwhile. If any check fails, nothing more is sent and the command stays on the clipboard for a manual paste. It never presses Return, never types text, and cannot target an existing terminal tab: Zed does not expose tabs, so selecting the tab that hosts a running session is not possible.
 
 Sessions hosted in tmux or over ssh have no GUI host to jump to.
 
@@ -82,19 +84,20 @@ Also in the panel: **Choose Zed Window**, open in a new window, reveal folder/tr
 
 ## Preferences
 
-| Preference    | Default  | Meaning                                         |
-| ------------- | -------- | ----------------------------------------------- |
-| Editor        | Zed      | Zed is the supported editor (see above)         |
-| Terminal      | Terminal | External terminal resume; iTerm2 also supported |
-| Claude CLI    | claude   | Known executable lookup or absolute path        |
-| Codex CLI     | codex    | Known executable lookup or absolute path        |
-| History Limit | 80       | Recent sessions per provider, max 500           |
+| Preference    | Default  | Meaning                                                                   |
+| ------------- | -------- | ------------------------------------------------------------------------- |
+| Editor        | Zed      | Zed is the supported editor (see above)                                   |
+| Terminal      | Terminal | External terminal resume; iTerm2 also supported                           |
+| Claude CLI    | claude   | Known executable lookup or absolute path                                  |
+| Codex CLI     | codex    | Known executable lookup or absolute path                                  |
+| History Limit | 80       | Recent sessions per provider, max 500                                     |
+| Zed Terminal  | off      | Experimental: type the resume command into a new Zed terminal (see above) |
 
 Binaries resolve from known locations (including `~/.local/bin`) and absolute PATH entries. Shell startup files, functions and aliases are not run. If `codex` is a shell function, resume uses the real executable; set a wrapper's absolute path to override.
 
 ## Security and privacy
 
-Nothing is uploaded. The extension does not read auth files, private keys or `.env` files, change agent settings, install hooks, or write to source databases. Session files are treated as untrusted input: UUIDs are validated, executables resolved, each shell argument quoted, and Codex transcript paths must stay inside a session store. Only explicit copy actions touch the clipboard; clipboard managers may keep the command. No simulated keystrokes or automatic paste are used for Zed.
+Nothing is uploaded. The extension does not read auth files, private keys or `.env` files, change agent settings, install hooks, or write to source databases. Session files are treated as untrusted input: UUIDs are validated, executables resolved, each shell argument quoted, and Codex transcript paths must stay inside a session store. Only explicit copy actions touch the clipboard; clipboard managers may keep the command. By default no key is sent to Zed. The experimental **Zed Terminal** preference sends two fixed key presses (new terminal, paste) to the Zed process after the checks above; there is no code path that sends Return or any other key.
 
 Raycast needs two macOS permissions: **Accessibility**, to read and raise windows, and **Automation**, to control System Events, Terminal, iTerm2 and Zed (macOS asks the first time each is used). If a jump says it could not read the editor's windows, check both under System Settings > Privacy & Security. Permission granted to a terminal does not carry over.
 

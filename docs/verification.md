@@ -6,7 +6,7 @@ This extends the existing Raycast extension. PromptCast was inspected as a desig
 
 ## Automated checks
 
-- `npm test`: 171 passing tests. Synthetic fixtures cover read-only SQLite catalogs, optional schema columns, archived filtering, rollout fallback, symlink confinement, command quoting and UUID validation, exact-path ownership, provider-isolated live merging, Codex lifecycle activity, Zed target resolution, host detection, and the action paths below. Modules that call AppleScript or the Raycast API are loaded with fakes (`tests/helpers/load-lib.ts`); no test touches a real window or the real clipboard.
+- `npm test`: 207 passing tests. Synthetic fixtures cover read-only SQLite catalogs, optional schema columns, archived filtering, rollout fallback, symlink confinement, command quoting and UUID validation, exact-path ownership, provider-isolated live merging, Codex lifecycle activity, Zed target resolution, host detection, and the action paths below. Modules that call AppleScript or the Raycast API are loaded with fakes (`tests/helpers/load-lib.ts`); no test touches a real window or the real clipboard.
   - `session-actions`: the real component is called and each action's handler is run against a fake Raycast API. Checked: what reaches the clipboard, the exact toast text for a reused window, a new window, an ambiguous window (the failure must say the command was copied), a row that cannot be resumed, a failed copy, live sessions with and without a GUI host, and background-job attach commands including a hostile job id.
   - `goto`: terminal-tab lookup per host kind, fallback to activating the host, Zed raise, reasons reported when no window matches, no-GUI-host sessions needing resume, activation failure.
   - `focus` and `windows`: window titles from the Window menu with accessibility and native-AX fallbacks, unique-match rule, refusal of ambiguous targets, a menu click not counting as success until the focused title is confirmed, AppleScript string escaping.
@@ -16,8 +16,9 @@ This extends the existing Raycast extension. PromptCast was inspected as a desig
   - `registry`, `process-age`, `agents`: a stale session file whose pid now belongs to another process is not shown as live; the cached CLI status only wins while the registry has not changed since and the session matches; the CLI cache and its invalidation.
   - `binary`: a symlinked CLI is returned as the link, not its versioned target, so a copied command survives an upgrade; non-executable, directory and shell-command inputs are refused.
   - `quote`: both quoters are round-tripped through a real `/bin/sh` and a real `osascript` with hostile strings, not compared with themselves.
+  - `zed-terminal` and `zed-input` (the opt-in typing into a new Zed terminal): the key table holds only a new terminal and a paste, and refuses Return, Enter, letters and prototype names; the sequence stops before any key for a multi-line command, a rebound key in the user's keymap, an unconfirmed or unfocused window, or a clipboard that differs; after the terminal key it stops without pasting if no terminal, two terminals, a wrong directory, a changed clipboard or lost focus is seen. In `session-actions`: the setting defaults to off, other editors and live rows never reach it, and a declined or failing terminal step leaves the command copied with the reason shown.
   - `codex-runtime`: no Codex process means stopped; any Codex process without a visible handle on a session means unknown; `lsof` or `ps` failure is uncertain.
-- Mutation check: five deliberate breakages of production code (Terminal using the iTerm lookup, a menu click accepted without confirming focus, the database no longer opened read-only, unknown Zed targets no longer refused, several Zed instances accepted) were each caught by exactly one failing test, then reverted. Four more in `session-actions` (a toast claiming the command was copied when it was not, a command never copied, the ambiguous failure no longer mentioning the copy, a background job id no longer validated) and each of the defect fixes listed below, reverted one at a time, were each caught by at least one failing test.
+- Mutation check: five deliberate breakages of production code (Terminal using the iTerm lookup, a menu click accepted without confirming focus, the database no longer opened read-only, unknown Zed targets no longer refused, several Zed instances accepted) were each caught by exactly one failing test, then reverted. Eight checks of the terminal sequence (a multi-line command, a changed clipboard, a wrong directory, two new terminals, lost focus, a rebound key, a Return key in the table; one further removal could not compile) were each caught by a failing test. Four more in `session-actions` (a toast claiming the command was copied when it was not, a command never copied, the ambiguous failure no longer mentioning the copy, a background job id no longer validated) and each of the defect fixes listed below, reverted one at a time, were each caught by at least one failing test.
 - `tsc --noEmit`, `npm run build`, `npm run lint` (manifest, icons, ESLint, Prettier) and `npm run format:check` pass.
 
 ## Static review
@@ -50,6 +51,8 @@ Across Spaces:
 
 These checks are reproducible: `ZED_GUI_TEST=1 npm run test:gui -- spaces` (`tests/gui/`). It is manual only, refuses to run without the variable, and is not part of `npm test` or CI. It raises each existing Zed window once, opens and closes only windows named `ztq-*`, and restores the original focus; it refuses to start if a `ztq-` window is already open.
 
+The `terminal` check (`-- terminal`) was run on the real Zed and passed: the command was typed into a new terminal of a disposable window, nothing ran until the test itself pressed Return, Return ran exactly what was typed, and a clipboard that no longer matched was refused without opening a terminal. The whole run, with navigation, passed thirteen of thirteen.
+
 Results: before the script was added to the repository, the same checks were run as throwaway scripts. Their first run passed nine of ten (one wrong expectation in the script itself), and after the review fixes they passed ten of ten twice and nine of nine for the fullscreen run. The repository version then passed sixteen of sixteen on the real Zed, after one fix to the script: the temporary directory is reached through a symlink (`/var` to `/private/var`) while Zed records real paths, which made the new windows look unresolvable until the path was resolved.
 
 Defects found by independent review and by the GUI checks, all fixed and covered by tests:
@@ -68,9 +71,9 @@ Earlier, the sandboxed System Events probe failed with error `-10827`; a permitt
 
 ## Scope
 
-Implemented: unified Claude/Codex list and previews, provider/path filters, read-only Codex catalog and bounded fallback, observed ownership with an unknown state, safe command construction, conservative Zed window resolution, an explicit window picker, and manual Zed resume (the command is copied, never typed).
+Implemented: unified Claude/Codex list and previews, provider/path filters, read-only Codex catalog and bounded fallback, observed ownership with an unknown state, safe command construction, conservative Zed window resolution, an explicit window picker, and Zed resume: the command is copied, and with the opt-in setting it is also pasted, never run, into a new terminal of the project's window.
 
-Not implemented: automatic command injection into Zed terminals, selection of the exact existing Zed terminal, annotations/pins, full-text transcript search, usage monitoring, hooks.
+Not implemented: selecting the exact existing Zed terminal tab that hosts a running session (Zed does not expose tabs; see `docs/zed-integration.md`), annotations/pins, full-text transcript search, usage monitoring, hooks.
 
 Out of scope: jumping to a live session hosted in VS Code, Cursor or any other editor. It is designed and tested for Zed only and may not work elsewhere.
 

@@ -174,7 +174,11 @@ def resuming_a_session() -> None:
     """
     diagram = chart("↩ · nothing hosts it", "docs/flow-resume")
     pill(diagram, "history", "history row:\nno process, only a transcript")
-    step(diagram, "copy", "copy the resume command\n(paste it into the project's\nZed terminal yourself)")
+    step(
+        diagram,
+        "copy",
+        "copy the resume command\n(paste it into the project's Zed terminal, or with the\nexperimental setting it is typed into a new one)",
+    )
     pill(diagram, "stuck", "live row with no GUI host\n(tmux, ssh)")
     choice(diagram, "window", "exactly one Zed window\nmatches the directory?")
     step(diagram, "raise", "raise it")

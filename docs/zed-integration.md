@@ -16,7 +16,7 @@ A unique DB-corroborated title can be focused through the Window menu. Exact pat
 
 Explicit window selection is available by unique title. This selects a window, not a terminal. Duplicate titles are displayed without an automatic focus action. Unknown resolution does not open a new window implicitly; a separate explicit action can do so with `--new`.
 
-No CLI path is handed to an existing Zed window to guess which project it should display. No global keystrokes, synthetic paste, or process termination are used.
+No CLI path is handed to an existing Zed window to guess which project it should display. By default no keystroke or paste is sent and no process is terminated. The opt-in **Zed Terminal** preference is the one exception, described below.
 
 ## Real GUI validation
 
@@ -40,3 +40,19 @@ Still unverified: moving across a different Space/fullscreen desktop and remote/
 Out of scope: jumping to a live session hosted in VS Code, Cursor or any other editor. Host detection, window matching and the Window-menu fallback are designed and tested for Zed only, and may not work elsewhere.
 
 Future terminal automation requires a delivery mechanism tied to the intended terminal. A new `sidebar_terminal_threads` row or a foreground check alone does not provide that guarantee. No actual session was launched or resumed as part of the window smoke tests.
+
+## Experimental: typing the resume command into a new Zed terminal
+
+Off by default (the **Zed Terminal** preference). Implemented in `src/lib/zed-terminal.ts` and `src/lib/zed-input.ts`.
+
+What was tried on Zed 1.25.3, and what it showed:
+
+- Ctrl+Shift+`posted to the Zed process opens a new terminal, and Cmd+V then pastes the clipboard into it. Shown by pasting`touch <file>` and pressing Return in a test: the file appeared.
+- A new terminal is detectable without reading the screen: Zed starts a `login` process per terminal, so one more `login` under the Zed process means one more terminal. Its shell's working directory (read with `lsof`) tells where it opened.
+- Typing into the new terminal's tty directly (TIOCSTI) is refused by macOS (`Operation not permitted`).
+- Accessibility exposes only the standard window buttons, not the tabs. Zed's database stores the tab order and which tab is active, but not which tab belongs to which process. A terminal's environment variables could not be read.
+- Cmd+1 did nothing and Cmd+2 opened an extra terminal in the test window, so tab switching by keystroke is not usable. Selecting the existing tab that hosts a running session is therefore not supported.
+
+Safety design: only two key presses can be sent (a table in `zed-input.ts`, with no Return); the paste happens only after the window, the clipboard and the new terminal have been checked, and a clipboard or focus change in between stops it. Each check has a test, and each was verified to fail when removed. A real-device check lives in `tests/gui` (`ZED_GUI_TEST=1 npm run test:gui -- terminal`).
+
+Known limits: it relies on Zed's default Ctrl+Shift+` for a new terminal. A user keymap that mentions that key disables the feature, and a rebinding made elsewhere is caught by the "exactly one new terminal appeared" check, in which case nothing is pasted.
