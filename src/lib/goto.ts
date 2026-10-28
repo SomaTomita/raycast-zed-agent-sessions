@@ -9,7 +9,16 @@ export interface GoToOptions {
 }
 
 export type GoToResult =
-  | { readonly kind: "reached"; readonly title: string; readonly message: string }
+  | {
+      readonly kind: "reached";
+      readonly title: string;
+      readonly message: string;
+    }
+  | {
+      readonly kind: "activated";
+      readonly title: string;
+      readonly message: string;
+    }
   /** Nothing hosts this session any more, so the caller decides whether to resume it. */
   | { readonly kind: "needs-resume" };
 
@@ -17,9 +26,9 @@ export type GoToResult =
 async function activateHost(pid: number, appName: string, message: string): Promise<GoToResult> {
   try {
     await activateProcess(pid);
-    return { kind: "reached", title: `Activated ${appName}`, message };
+    return { kind: "activated", title: `Activated ${appName}`, message };
   } catch {
-    return { kind: "reached", title: `${appName} is no longer on screen`, message: "Nothing was launched" };
+    throw new Error(`${appName} is no longer available; no session was resumed`);
   }
 }
 
@@ -39,7 +48,11 @@ export async function goToSession(item: SessionItem, options: GoToOptions = {}):
   if (live.tty.length > 0 && (live.hostKind === "iterm" || live.hostKind === "terminal")) {
     const focused = live.hostKind === "iterm" ? await focusItermTab(live.tty) : await focusTerminalTab(live.tty);
     if (focused) {
-      return { kind: "reached", title: `Jumped to ${live.hostApp}`, message: `${live.name} · ${live.tty}` };
+      return {
+        kind: "reached",
+        title: `Jumped to ${live.hostApp}`,
+        message: `${live.name} · ${live.tty}`,
+      };
     }
     return activateHost(live.hostPid, live.hostApp, `No tab on ${live.tty}`);
   }

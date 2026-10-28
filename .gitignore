@@ -3,3 +3,5 @@ dist
 .DS_Store
 raycast-env.d.ts
 __pycache__/
+
+.test-dist/

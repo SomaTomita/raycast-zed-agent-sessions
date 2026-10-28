@@ -1,25 +1,28 @@
 import { homedir } from "node:os";
 
-const COMMAND_TAG = /<\/?(local-command-stdout|local-command-caveat|command-name|command-message|command-args|system-reminder)>/g;
+const COMMAND_TAG =
+  /<\/?(local-command-stdout|local-command-caveat|command-name|command-message|command-args|system-reminder)>/g;
 const XML_BLOCK = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
 
 /** Turns a raw prompt into a single readable line for list titles. */
 export function cleanPrompt(text: string, maxLength = 120): string {
-  const flattened = text
-    .replace(XML_BLOCK, " ")
-    .replace(COMMAND_TAG, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const flattened = text.replace(XML_BLOCK, " ").replace(COMMAND_TAG, " ").replace(/\s+/g, " ").trim();
   return flattened.length > maxLength ? `${flattened.slice(0, maxLength - 1)}…` : flattened;
 }
 
 /** Last path segment of the working directory, falling back to the encoded project slug. */
 export function projectName(cwd: string, projectSlug: string): string {
-  const fromCwd = cwd.split("/").filter((part) => part.length > 0).pop();
+  const fromCwd = cwd
+    .split("/")
+    .filter((part) => part.length > 0)
+    .pop();
   if (fromCwd !== undefined && fromCwd.length > 0) {
     return fromCwd;
   }
-  const fromSlug = projectSlug.split("-").filter((part) => part.length > 0).pop();
+  const fromSlug = projectSlug
+    .split("-")
+    .filter((part) => part.length > 0)
+    .pop();
   return fromSlug ?? projectSlug;
 }
 

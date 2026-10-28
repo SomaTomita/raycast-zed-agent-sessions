@@ -68,9 +68,7 @@ export async function openProjectInNewWindow(appName: string, cwd: string): Prom
 
   const cli = resolveEditorCli(appName);
   if (cli === null) {
-    // `open -a` hands the path to the running instance, which may reuse a window; least-bad fallback.
-    await run("/usr/bin/open", ["-a", appName, cwd]);
-    return;
+    throw new Error(`${appName} CLI not found; a new project window could not be guaranteed`);
   }
 
   const flag = NEW_WINDOW_FLAG[appName];

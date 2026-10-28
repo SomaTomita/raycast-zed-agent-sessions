@@ -2,10 +2,13 @@ import { Color, Icon, List } from "@raycast/api";
 
 import { cleanPrompt, formatAbsolute, formatBytes, formatDuration, formatHomePath } from "../lib/format";
 import { TranscriptMessage } from "../lib/messages";
+import { processState } from "../lib/session-status";
 import { SessionItem, SessionState } from "../lib/sessions";
 
 const STATE_COLOR: Record<SessionState, Color> = {
   working: Color.Green,
+  running: Color.Green,
+  unknown: Color.Orange,
   waiting: Color.Blue,
   background: Color.Purple,
   closed: Color.SecondaryText,
@@ -61,7 +64,17 @@ export function SessionDetail(props: Props) {
       markdown={markdown(props)}
       metadata={
         <List.Item.Detail.Metadata>
-          <List.Item.Detail.Metadata.TagList title="Status">
+          <List.Item.Detail.Metadata.Label
+            title="Session Process"
+            text={
+              processState(item) === "open"
+                ? "Running"
+                : processState(item) === "closed"
+                  ? "Not running"
+                  : "Unconfirmed"
+            }
+          />
+          <List.Item.Detail.Metadata.TagList title="Runtime Evidence">
             <List.Item.Detail.Metadata.TagList.Item text={item.statusLabel} color={STATE_COLOR[item.state]} />
           </List.Item.Detail.Metadata.TagList>
           <List.Item.Detail.Metadata.Label
@@ -84,7 +97,9 @@ export function SessionDetail(props: Props) {
             text={[
               item.model.length > 0 ? item.model : "unknown model",
               item.messageCount === null ? null : `${item.messageCount}${item.messageCountExact ? "" : "+"} msg`,
-              item.transcript === null ? null : formatBytes(item.transcript.sizeBytes),
+              item.transcript === null || item.transcript.sizeBytes === 0
+                ? null
+                : formatBytes(item.transcript.sizeBytes),
             ]
               .filter((part): part is string => part !== null)
               .join(" · ")}

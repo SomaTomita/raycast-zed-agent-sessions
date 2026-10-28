@@ -1,185 +1,197 @@
-import { Action, ActionPanel, Alert, confirmAlert, Icon, showToast, Toast } from "@raycast/api";
+import { Action, ActionPanel, Clipboard, Icon, showToast, Toast } from "@raycast/api";
 import { showFailureToast } from "@raycast/utils";
 
-import { editorLabel } from "../lib/editor";
+import { editorLabel, openProjectInNewWindow } from "../lib/editor";
 import { revealProject } from "../lib/focus";
 import { goToSession } from "../lib/goto";
-import { quitProcess } from "../lib/processes";
-import { resumeCommand, resumeManyInTerminal, TerminalApp } from "../lib/resume";
+import { readLiveSessions } from "../lib/registry";
+import { readCodexRuntime } from "../lib/codex-live";
+import { CodexRecord } from "../lib/codex-records";
+import { resumeCommand, resumeInTerminal, TerminalApp } from "../lib/resume";
+import { providerLabel, sessionKey } from "../lib/session-types";
+import { resolveBinary } from "../lib/binary";
+import { shellQuote } from "../lib/quote";
 import { SessionItem } from "../lib/sessions";
 import { TranscriptView } from "./transcript-view";
+import { ZedWindowPicker } from "./zed-window-picker";
+import { FilterProps, SessionFilters } from "./session-filters";
 
 interface Props {
   readonly item: SessionItem;
   readonly terminal: TerminalApp;
   readonly editor: string;
   readonly claudeBin: string;
-  /** Live process with no editor window left: treat it like history, and offer to clean it up. */
-  readonly unreachable: boolean;
-  /** Background agent: no process to reach, managed by the CLI with `claude attach|stop|rm`. */
-  readonly background: boolean;
-  /** Every other session in the same directory that cannot be reached either. */
-  readonly siblings: readonly SessionItem[];
+  readonly codexBin: string;
   readonly onRefresh: () => void;
   readonly onToggleDetail: () => void;
+  readonly filters: FilterProps;
 }
 
-function terminalLabel(terminal: TerminalApp): string {
-  return terminal === "iTerm" ? "iTerm2" : "Terminal";
-}
+// Shared by all rows: repeated Enter must not launch overlapping copies.
+const pending = new Set<string>();
 
 export function SessionActions({
   item,
   terminal,
   editor,
   claudeBin,
-  unreachable,
-  background,
-  siblings,
+  codexBin,
   onRefresh,
   onToggleDetail,
+  filters,
 }: Props) {
-  const isLive = item.live !== null && !unreachable;
+  const preferred = item.provider === "codex" ? codexBin : claudeBin;
+  const terminalLabel = terminal === "iTerm" ? "iTerm2" : "Terminal";
 
-  /** Resumes `targets`, first offering to quit the stale processes still holding those sessions. */
-  async function resume(targets: readonly SessionItem[], heading: string) {
-    const stale = targets.filter((target) => target.live !== null);
-    if (stale.length > 0) {
-      const pids = stale.map((target) => `${target.live?.name} (pid ${target.live?.pid})`).join(", ");
-      const confirmed = await confirmAlert({
-        title: heading,
-        message: `${stale.length === 1 ? "This session is" : "These sessions are"} still held by a process with no window: ${pids}. Quitting it first keeps a single process per transcript.`,
-        icon: Icon.Terminal,
-        primaryAction: { title: "Quit Stale and Resume", style: Alert.ActionStyle.Destructive },
-      });
-      if (!confirmed) {
-        return;
-      }
-      for (const target of stale) {
-        const pid = target.live?.pid;
-        if (pid !== undefined) {
-          try {
-            await quitProcess(pid, target.live?.startedAt ?? null);
-          } catch (error) {
-            await showFailureToast(error, { title: `Could not quit pid ${pid}` });
-            return;
-          }
-        }
-      }
-    }
-
+  async function copyCommand() {
     try {
-      await resumeManyInTerminal({
-        terminal,
-        claudeBin,
-        targets: targets.map((target) => ({ sessionId: target.sessionId, cwd: target.cwd })),
-      });
+      if (!item.resumable) throw new Error("CLI resume has not been verified for this session source");
+      await Clipboard.copy(await resumeCommand(item, preferred));
       await showToast({
         style: Toast.Style.Success,
-        title: `Resuming ${targets.length === 1 ? "session" : `${targets.length} sessions`} in ${terminalLabel(terminal)}`,
-        message: targets.length === 1 ? targets[0].title : targets.map((target) => target.project).join(", "),
+        title: "Copied resume command",
+        message: "Paste it in the project's Zed terminal; avoid resuming a session that is already running",
       });
-      onRefresh();
     } catch (error) {
-      await showFailureToast(error, { title: "Could not resume" });
-    }
-  }
-
-  async function goTo() {
-    const toast = await showToast({ style: Toast.Style.Animated, title: "Locating session…" });
-    try {
-      const result = await goToSession(item, { unreachable });
-      if (result.kind === "reached") {
-        toast.style = Toast.Style.Success;
-        toast.title = result.title;
-        toast.message = result.message;
-        return;
-      }
-      toast.hide();
-      await resume([item], `Resume ${item.title} in ${terminalLabel(terminal)}?`);
-    } catch (error) {
-      toast.hide();
-      await showFailureToast(error, { title: "Could not reach the session" });
+      await showFailureToast(error, { title: "Could not copy resume command" });
     }
   }
 
   async function openEditor() {
     try {
-      const reused = await revealProject(editor, item.cwd, item.live?.hostPid ?? 0);
-      if (!reused) {
-        await showToast({
-          style: Toast.Style.Success,
-          title: `Opened a new ${editorLabel(editor)} window`,
-          message: item.project,
-        });
-      }
+      const reused = await revealProject(editor, item.cwd, item.live?.hostKind === "editor" ? item.live.hostPid : 0);
+      await showToast({
+        style: Toast.Style.Success,
+        title: reused ? `Moved to ${editorLabel(editor)} project` : `Opened new ${editorLabel(editor)} window`,
+        message: "Project window only; no terminal command was sent",
+      });
     } catch (error) {
-      await showFailureToast(error, { title: `Could not open ${editorLabel(editor)}` });
+      await showFailureToast(error, {
+        title: "Could not identify a unique project window",
+      });
     }
   }
 
-  async function quitStale() {
-    const live = item.live;
-    if (live === null) {
+  async function primary() {
+    if (item.live !== null) {
+      try {
+        const result = await goToSession(item);
+        if (result.kind !== "needs-resume") {
+          await showToast({
+            style: Toast.Style.Success,
+            title: result.title,
+            message: result.message,
+          });
+          return;
+        }
+        await openEditor();
+      } catch (error) {
+        await showFailureToast(error, { title: "Could not reach session" });
+      }
       return;
     }
-    const confirmed = await confirmAlert({
-      title: `Quit ${live.name}?`,
-      message: `Sends SIGTERM to pid ${live.pid}. The transcript stays on disk and the session can be resumed later.`,
-      icon: Icon.XMarkCircle,
-      primaryAction: { title: "Quit Process", style: Alert.ActionStyle.Destructive },
-    });
-    if (!confirmed) {
-      return;
-    }
+    // Copy first: lookup failure leaves a useful command without injecting it anywhere.
+    if (item.resumable) await copyCommand();
+    await openEditor();
+  }
+
+  async function explicitTerminalResume() {
+    const key = sessionKey(item.provider, item.sessionId);
+    if (pending.has(key)) return;
+    pending.add(key);
     try {
-      await quitProcess(live.pid, live.startedAt);
-      await showToast({ style: Toast.Style.Success, title: `Quit pid ${live.pid}`, message: live.name });
+      if (!item.resumable || item.live || item.state === "unknown")
+        throw new Error("Session is running or its ownership is unknown; automatic resume was blocked");
+      if (item.provider === "claude") {
+        if ((await readLiveSessions()).some((live) => live.sessionId === item.sessionId))
+          throw new Error("This session is already running");
+      } else {
+        const session: CodexRecord = {
+          id: item.sessionId,
+          cwd: item.cwd,
+          path: item.transcript?.path ?? "",
+          title: item.title,
+          firstPrompt: "",
+          updatedAt: item.lastActivityMs,
+          branch: item.gitBranch,
+          model: item.model,
+          source: item.source,
+          resumable: item.resumable,
+        };
+        const runtime = await readCodexRuntime([session]);
+        if (runtime.uncertain || runtime.live.has(item.sessionId))
+          throw new Error("Could not confirm this Codex session is stopped");
+      }
+      await resumeInTerminal({ terminal, target: item, preferred });
+      await showToast({
+        style: Toast.Style.Success,
+        title: `Sent resume command to ${terminalLabel}`,
+        message: "Check the terminal for CLI startup",
+      });
       onRefresh();
     } catch (error) {
-      await showFailureToast(error, { title: "Could not quit the process" });
+      await showFailureToast(error, { title: "Could not resume session" });
+    } finally {
+      pending.delete(key);
     }
   }
-
-  function command(): string {
-    try {
-      return resumeCommand({ claudeBin, cwd: item.cwd, sessionId: item.sessionId });
-    } catch {
-      return `claude --resume ${item.sessionId}`;
-    }
-  }
-
-  const attachCommand = item.agent !== null ? `claude attach ${item.agent.id}` : "";
-  const projectGroup = [item, ...siblings];
-  const goToTitle = isLive
-    ? `Go to Session${item.live?.hostApp ? ` in ${item.live.hostApp}` : ""}`
-    : `Resume in ${terminalLabel(terminal)}`;
 
   return (
     <ActionPanel>
       <ActionPanel.Section>
-        {background ? (
-          <Action.CopyToClipboard title="Copy Attach Command" icon={Icon.Terminal} content={attachCommand} />
-        ) : (
-          <Action title={goToTitle} icon={isLive ? Icon.ArrowRight : Icon.Terminal} onAction={goTo} />
-        )}
-        {siblings.length > 0 ? (
+        {item.agent !== null ? (
           <Action
-            title={`Resume All ${projectGroup.length} in ${item.project}`}
+            title="Copy Attach Command"
             icon={Icon.CopyClipboard}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "return" }}
-            onAction={() =>
-              resume(projectGroup, `Resume ${projectGroup.length} sessions from ${item.project} in ${terminalLabel(terminal)}?`)
-            }
+            onAction={async () => {
+              try {
+                const id = item.agent?.id ?? "";
+                if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(id)) throw new Error("Invalid background job ID");
+                await Clipboard.copy(
+                  `${shellQuote(await resolveBinary("claude", claudeBin))} attach ${shellQuote(id)}`,
+                );
+                await showToast({ style: Toast.Style.Success, title: "Copied attach command" });
+              } catch (error) {
+                await showFailureToast(error, { title: "Could not copy attach command" });
+              }
+            }}
           />
-        ) : null}
+        ) : (
+          <Action
+            title={
+              item.live
+                ? "Go to Session Window"
+                : item.resumable
+                  ? `Open in ${editorLabel(editor)} and Copy Resume Command`
+                  : `Open Project in ${editorLabel(editor)}`
+            }
+            icon={Icon.AppWindow}
+            onAction={primary}
+          />
+        )}
         <Action
-          title={`Move to ${editorLabel(editor)}`}
+          title={`Move to ${editorLabel(editor)} Project`}
           icon={Icon.Code}
           shortcut={{ modifiers: ["cmd"], key: "e" }}
           onAction={openEditor}
         />
-        {item.transcript !== null ? (
+        {editor === "Zed" ? (
+          <Action.Push title="Choose Zed Window" icon={Icon.AppWindow} target={<ZedWindowPicker />} />
+        ) : null}
+        <Action
+          title={`Open Project in New ${editorLabel(editor)} Window`}
+          icon={Icon.Plus}
+          onAction={async () => {
+            try {
+              await openProjectInNewWindow(editor, item.cwd);
+            } catch (error) {
+              await showFailureToast(error, {
+                title: "Could not open project",
+              });
+            }
+          }}
+        />
+        {item.transcript ? (
           <Action.Push
             title="Open Transcript"
             icon={Icon.Document}
@@ -187,7 +199,6 @@ export function SessionActions({
             target={<TranscriptView item={item} />}
           />
         ) : null}
-        {item.cwd.length > 0 ? <Action.ShowInFinder title="Open Project Folder" path={item.cwd} /> : null}
         <Action
           title="Toggle Details"
           icon={Icon.Sidebar}
@@ -195,37 +206,26 @@ export function SessionActions({
           onAction={onToggleDetail}
         />
       </ActionPanel.Section>
-
-      <ActionPanel.Section>
+      <ActionPanel.Section title={providerLabel(item.provider)}>
+        {item.resumable ? (
+          <Action
+            title="Copy Resume Command"
+            icon={Icon.CopyClipboard}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
+            onAction={copyCommand}
+          />
+        ) : null}
+        {item.resumable && !item.live && item.state !== "unknown" ? (
+          <Action title={`Resume in ${terminalLabel}`} icon={Icon.Terminal} onAction={explicitTerminalResume} />
+        ) : null}
         <Action.CopyToClipboard
           title="Copy Session ID"
           content={item.sessionId}
           shortcut={{ modifiers: ["cmd"], key: "." }}
         />
-        <Action.CopyToClipboard
-          title="Copy Resume Command"
-          content={command()}
-          shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
-        />
-        {item.lastPrompt !== null ? (
-          <Action.CopyToClipboard title="Copy Last Prompt" content={item.lastPrompt.display} />
-        ) : null}
-        {item.cwd.length > 0 ? <Action.CopyToClipboard title="Copy Directory Path" content={item.cwd} /> : null}
-      </ActionPanel.Section>
-
-      <ActionPanel.Section>
-        {item.transcript !== null ? (
-          <Action.ShowInFinder title="Show Transcript in Finder" path={item.transcript.path} />
-        ) : null}
-        {unreachable && item.live !== null ? (
-          <Action
-            title={`Quit Stale Process (pid ${item.live.pid})`}
-            icon={Icon.XMarkCircle}
-            style={Action.Style.Destructive}
-            shortcut={{ modifiers: ["ctrl"], key: "x" }}
-            onAction={quitStale}
-          />
-        ) : null}
+        {item.cwd ? <Action.CopyToClipboard title="Copy Directory Path" content={item.cwd} /> : null}
+        {item.cwd ? <Action.ShowInFinder title="Open Project Folder" path={item.cwd} /> : null}
+        {item.transcript ? <Action.ShowInFinder title="Show Transcript in Finder" path={item.transcript.path} /> : null}
         <Action
           title="Refresh"
           icon={Icon.ArrowClockwise}
@@ -233,6 +233,7 @@ export function SessionActions({
           onAction={onRefresh}
         />
       </ActionPanel.Section>
+      <SessionFilters {...filters} />
     </ActionPanel>
   );
 }

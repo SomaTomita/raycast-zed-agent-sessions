@@ -5,5 +5,6 @@ export function shellQuote(value: string): string {
 
 /** Double-quotes a value for AppleScript. */
 export function appleQuote(value: string): string {
-  return `"${value.split("\\").join("\\\\").split('"').join('\\"')}"`;
+  const escaped = value.split("\\").join("\\\\").split('"').join('\\"').split("\r").join("\\r").split("\n").join("\\n");
+  return `"${escaped}"`;
 }

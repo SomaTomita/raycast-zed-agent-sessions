@@ -133,7 +133,10 @@ export async function indexTranscripts(): Promise<TranscriptFile[]> {
 
 /** Feeds `onLine` one line at a time. Never holds more than a chunk plus one line. */
 async function forEachLine(path: string, onLine: (line: string) => void): Promise<boolean> {
-  const stream = createReadStream(path, { encoding: "utf8", highWaterMark: CHUNK_BYTES });
+  const stream = createReadStream(path, {
+    encoding: "utf8",
+    highWaterMark: CHUNK_BYTES,
+  });
   let carry = "";
   let consumed = 0;
   let truncated = false;
@@ -245,16 +248,28 @@ export async function summarizeTranscript(file: TranscriptFile): Promise<Transcr
   };
 }
 
-const summaryCache = new Map<string, { readonly mtimeMs: number; readonly summary: TranscriptSummary }>();
+const summaryCache = new Map<
+  string,
+  {
+    readonly mtimeMs: number;
+    readonly sizeBytes: number;
+    readonly summary: TranscriptSummary;
+  }
+>();
 
 /** Memoised per path+mtime: re-reading unchanged transcripts on every refresh is the slow part. */
 export async function summarizeTranscriptCached(file: TranscriptFile): Promise<TranscriptSummary> {
   const cached = summaryCache.get(file.path);
-  if (cached !== undefined && cached.mtimeMs === file.mtimeMs) {
+  if (cached !== undefined && cached.mtimeMs === file.mtimeMs && cached.sizeBytes === file.sizeBytes) {
     return cached.summary;
   }
   const summary = await summarizeTranscript(file);
-  summaryCache.set(file.path, { mtimeMs: file.mtimeMs, summary });
+  if (summaryCache.size >= 1000) summaryCache.delete(summaryCache.keys().next().value!);
+  summaryCache.set(file.path, {
+    mtimeMs: file.mtimeMs,
+    sizeBytes: file.sizeBytes,
+    summary,
+  });
   return summary;
 }
 

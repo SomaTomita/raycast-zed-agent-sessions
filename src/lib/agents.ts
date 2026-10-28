@@ -133,7 +133,10 @@ export async function readAgents(preferredBinary?: string): Promise<Agent[]> {
   statusByPid.clear();
   for (const agent of agents) {
     if (agent.kind === "interactive") {
-      statusByPid.set(agent.pid, { status: agent.status, waitingFor: agent.waitingFor });
+      statusByPid.set(agent.pid, {
+        status: agent.status,
+        waitingFor: agent.waitingFor,
+      });
     }
   }
 

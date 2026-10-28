@@ -4,6 +4,9 @@ import { runAppleScript } from "@raycast/utils";
 
 import { activateProcess } from "./activate";
 import { appleQuote } from "./quote";
+import { readZedSnapshot } from "./zed-workspaces";
+import { resolveZedTarget } from "./zed-targets";
+import { inspectZedWindows, zedPid } from "./native-zed";
 
 /** Zed titles windows `project — active file`; a multi-root workspace lists roots as `a, b`. */
 const TITLE_SEPARATOR = " — ";
@@ -53,23 +56,49 @@ async function listAccessibilityWindowTitles(processName: string): Promise<strin
     return out
   end tell
 end tell`);
-  return output.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
 }
 
-export async function listWindowTitles(processName: string): Promise<string[]> {
+export type WindowSnapshot =
+  { readonly kind: "available"; readonly titles: string[] } | { readonly kind: "unavailable" };
+
+export async function readWindowTitles(processName: string): Promise<WindowSnapshot> {
   try {
     const fromMenu = await listMenuWindowTitles(processName);
     if (fromMenu.length > 0) {
-      return fromMenu;
+      return { kind: "available", titles: fromMenu };
     }
   } catch {
     // fall through to the accessibility list
   }
   try {
-    return await listAccessibilityWindowTitles(processName);
+    return {
+      kind: "available",
+      titles: await listAccessibilityWindowTitles(processName),
+    };
   } catch {
-    return [];
+    if (processName === "zed") {
+      try {
+        const pid = await zedPid();
+        if (pid !== null)
+          return {
+            kind: "available",
+            titles: (await inspectZedWindows(pid)).titles,
+          };
+      } catch {
+        /* Unknown access is kept separate from an empty window list. */
+      }
+    }
+    return { kind: "unavailable" };
   }
+}
+
+export async function listWindowTitles(processName: string): Promise<string[]> {
+  const snapshot = await readWindowTitles(processName);
+  return snapshot.kind === "available" ? snapshot.titles : [];
 }
 
 /** Every project root currently shown by that application's windows. */
@@ -91,8 +120,7 @@ function rootsOf(title: string): string[] {
  * Returns false when no window matches, leaving the application untouched, so the caller can
  * decide what to do instead of mutating an existing workspace.
  *
- * Matching is by folder name: window titles carry no path, so two projects sharing a basename
- * cannot be told apart. The first match wins.
+ * Zed requires exact DB path corroboration; other editors require a unique title match.
  */
 export async function focusProjectWindow(
   appName: string,
@@ -106,11 +134,32 @@ export async function focusProjectWindow(
   }
 
   const titles = await listWindowTitles(processName);
-  const index = titles.findIndex((title) => rootsOf(title).includes(target));
-  if (index < 0) {
-    return false;
+  let title: string;
+  if (appName === "Zed") {
+    const resolved = resolveZedTarget(cwd, titles, await readZedSnapshot());
+    if (resolved.kind !== "matched") return false;
+    title = resolved.title;
+  } else {
+    const matches = titles.filter((entry) => rootsOf(entry).includes(target));
+    if (matches.length !== 1) return false;
+    title = matches[0];
   }
-  const title = titles[index];
+
+  return focusWindowTitle(processName, title, hostPid);
+}
+
+/** Called only with a unique title, or after the user explicitly selects a window. */
+export async function focusWindowTitle(processName: string, title: string, hostPid = 0): Promise<boolean> {
+  if ((await listWindowTitles(processName)).filter((entry) => entry === title).length !== 1) return false;
+
+  const nativePid = processName === "zed" ? await zedPid() : null;
+  if (nativePid !== null) {
+    try {
+      if ((await inspectZedWindows(nativePid, title)).reached) return true;
+    } catch {
+      /* Fall back to the Window menu for windows on other Spaces. */
+    }
+  }
 
   // Clicking a menu item needs the application in front, and activation by pid never launches it.
   if (hostPid > 0) {
@@ -124,8 +173,11 @@ export async function focusProjectWindow(
   const clicked = await runAppleScript(`tell application "System Events"
   if not (exists process ${appleQuote(processName)}) then return "missing"
   tell process ${appleQuote(processName)}
+    set frontmost to true
     try
-      repeat with mi in (menu items of menu 1 of menu bar item "Window" of menu bar 1)
+      set matchingItems to every menu item of menu 1 of menu bar item "Window" of menu bar 1 whose name is ${appleQuote(title)}
+      if (count of matchingItems) is not 1 then return "missing"
+      repeat with mi in matchingItems
         if (name of mi as text) is ${appleQuote(title)} then
           click mi
           return "ok"
@@ -135,7 +187,9 @@ export async function focusProjectWindow(
       return "missing"
     end try
     try
-      perform action "AXRaise" of (first window whose name is ${appleQuote(title)})
+      set matchingWindows to every window whose name is ${appleQuote(title)}
+      if (count of matchingWindows) is not 1 then return "missing"
+      perform action "AXRaise" of item 1 of matchingWindows
       return "ok"
     on error
       return "missing"
@@ -143,5 +197,14 @@ export async function focusProjectWindow(
   end tell
 end tell`);
 
-  return clicked.trim() === "ok";
+  if (clicked.trim() !== "ok") return false;
+  if (processName === "zed") {
+    if (nativePid === null) return false;
+    try {
+      return (await inspectZedWindows(nativePid)).focused === title;
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }

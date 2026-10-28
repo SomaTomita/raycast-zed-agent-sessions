@@ -1,8 +1,8 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "claude-code-sessions",
-  "title": "Claude Code Sessions",
-  "description": "Browse Claude Code session history and live status (working / idle / closed) without leaving Raycast.",
+  "title": "Raycast Zed Agent Sessions",
+  "description": "Find Claude Code and Codex sessions and return to their Zed project windows.",
   "icon": "icon.png",
   "author": "soma",
   "categories": [
@@ -12,9 +12,9 @@
   "commands": [
     {
       "name": "sessions",
-      "title": "Claude Code Sessions",
-      "subtitle": "Claude Code",
-      "description": "List live Claude Code sessions with their status, plus recent session history.",
+      "title": "Coding Agent Sessions",
+      "subtitle": "Zed \u00b7 Claude & Codex",
+      "description": "Search local Claude and Codex sessions, focus a project window, or copy a resume command.",
       "mode": "view"
     }
   ],
@@ -62,15 +62,23 @@
     {
       "name": "claudeBin",
       "title": "Claude CLI",
-      "description": "Command used to launch Claude Code.",
+      "description": "Absolute executable path or claude. Shell functions and aliases are not executed.",
       "type": "textfield",
       "required": false,
       "default": "claude"
     },
     {
+      "name": "codexBin",
+      "title": "Codex CLI",
+      "description": "Absolute executable path or codex. Shell functions and aliases are not executed.",
+      "type": "textfield",
+      "required": false,
+      "default": "codex"
+    },
+    {
       "name": "historyLimit",
       "title": "History Limit",
-      "description": "How many recent sessions to scan (higher is slower).",
+      "description": "Maximum recent sessions per provider (up to 500).",
       "type": "textfield",
       "required": false,
       "default": "80"
@@ -80,7 +88,9 @@
     "build": "ray build -e dist",
     "dev": "ray develop",
     "lint": "ray lint",
-    "fix-lint": "ray lint --fix"
+    "fix-lint": "ray lint --fix",
+    "test": "tsc -p tsconfig.test.json && node --test .test-dist/tests/*.test.js",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"tests/**/*.ts\""
   },
   "dependencies": {
     "@raycast/api": "^1.104.25",
@@ -89,6 +99,7 @@
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
+    "prettier": "^3.9.10",
     "typescript": "^7.0.2"
   }
 }

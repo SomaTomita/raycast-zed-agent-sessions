@@ -37,7 +37,12 @@ const PID_FILE = /^(\d+)\.json$/;
 const hostCache = new Map<number, HostInfo>();
 
 /** Cached for a pid `ps` did not list, so a vanishing process cannot force a spawn every poll. */
-const UNRESOLVED_HOST: HostInfo = { kind: "unknown", appName: "", hostPid: 0, tty: "" };
+const UNRESOLVED_HOST: HostInfo = {
+  kind: "unknown",
+  appName: "",
+  hostPid: 0,
+  tty: "",
+};
 
 /** When `ps` itself fails the table comes back empty; retrying it every 3s would be pointless. */
 const TABLE_FAILURE_COOLDOWN_MS = 30_000;
@@ -105,6 +110,7 @@ function parseRegistryFile(raw: string, filePid: number): LiveSession | null {
   if (sessionId.length === 0) {
     return null;
   }
+  if (record.pid !== undefined && record.pid !== filePid) return null;
 
   return {
     pid: optionalNumber(record.pid) ?? filePid,
@@ -134,7 +140,7 @@ export async function readLiveSessions(): Promise<LiveSession[]> {
   try {
     entries = await readdir(REGISTRY_DIR);
   } catch (error) {
-    if (isMissingOrDenied(error)) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
     }
     throw error;
@@ -143,7 +149,10 @@ export async function readLiveSessions(): Promise<LiveSession[]> {
   const candidates = entries
     .map((name) => ({ name, match: PID_FILE.exec(name) }))
     .filter((entry): entry is { name: string; match: RegExpExecArray } => entry.match !== null)
-    .map((entry) => ({ name: entry.name, pid: Number.parseInt(entry.match[1], 10) }))
+    .map((entry) => ({
+      name: entry.name,
+      pid: Number.parseInt(entry.match[1], 10),
+    }))
     .filter((entry) => isAlive(entry.pid));
 
   const parsed = await Promise.all(
@@ -151,7 +160,7 @@ export async function readLiveSessions(): Promise<LiveSession[]> {
       try {
         return parseRegistryFile(await readFile(join(REGISTRY_DIR, name), "utf8"), pid);
       } catch (error) {
-        if (isMissingOrDenied(error)) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
           return null;
         }
         throw error;
@@ -159,7 +168,7 @@ export async function readLiveSessions(): Promise<LiveSession[]> {
     }),
   );
 
-  const sessions = parsed.filter((session): session is LiveSession => session !== null);
+  const sessions = parsed.filter((session): session is LiveSession => session !== null && isAlive(session.pid));
   // Keyed on the pid inside the file, which `parseRegistryFile` prefers over the filename.
   const hosts = await resolveHosts(sessions.map((session) => session.pid));
 
@@ -179,7 +188,13 @@ export async function readLiveSessions(): Promise<LiveSession[]> {
 
       // The CLI knows about `waiting` and why; the registry file only carries busy/idle/shell.
       const fromCli = agentStatusOf(session.pid);
-      return fromCli === null ? withHost : { ...withHost, status: fromCli.status, waitingFor: fromCli.waitingFor };
+      return fromCli === null
+        ? withHost
+        : {
+            ...withHost,
+            status: fromCli.status,
+            waitingFor: fromCli.waitingFor,
+          };
     })
     .sort((a, b) => (b.statusUpdatedAt ?? 0) - (a.statusUpdatedAt ?? 0));
 }

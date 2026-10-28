@@ -3,6 +3,9 @@ import { runAppleScript } from "@raycast/utils";
 import { editorProcessName, openProjectInNewWindow } from "./editor";
 import { appleQuote } from "./quote";
 import { focusProjectWindow } from "./windows";
+import { listWindowTitles } from "./windows";
+import { readZedSnapshot } from "./zed-workspaces";
+import { resolveZedTarget } from "./zed-targets";
 
 /** Selects the exact iTerm2 tab running on `tty`. Returns false when no tab matches. */
 export async function focusItermTab(tty: string): Promise<boolean> {
@@ -48,6 +51,13 @@ end tell`);
  * Returns true when an existing window was reused.
  */
 export async function revealProject(appName: string, cwd: string, hostPid = 0): Promise<boolean> {
+  if (appName === "Zed") {
+    const [titles, snapshot] = await Promise.all([listWindowTitles("zed"), readZedSnapshot()]);
+    const target = resolveZedTarget(cwd, titles, snapshot);
+    if (target.kind === "ambiguous" || target.kind === "unknown") {
+      throw new Error(`${target.reason}. Use Choose Zed Window or explicitly open a new window`);
+    }
+  }
   if (await focusProjectWindow(appName, editorProcessName(appName), cwd, hostPid)) {
     return true;
   }

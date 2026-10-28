@@ -2,7 +2,9 @@ import { Detail } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
 
 import { formatAbsolute, formatHomePath } from "../lib/format";
-import { readRecentMessages, TranscriptMessage } from "../lib/messages";
+import { TranscriptMessage } from "../lib/messages";
+import { readProviderMessages } from "../lib/provider-messages";
+import { ProviderId } from "../lib/session-types";
 import { SessionItem } from "../lib/sessions";
 
 /** Turns shown in the full-width view, and how much of each. */
@@ -23,9 +25,9 @@ function turn(message: TranscriptMessage): string {
 export function TranscriptView({ item }: { item: SessionItem }) {
   const path = item.transcript?.path ?? "";
   const { data, isLoading } = useCachedPromise(
-    (target: string) => (target.length === 0 ? Promise.resolve([]) : readRecentMessages(target, TURN_COUNT)),
-    [path],
-    { initialData: [] as TranscriptMessage[], keepPreviousData: true },
+    (provider: ProviderId, target: string) => readProviderMessages(provider, target, TURN_COUNT),
+    [item.provider, path],
+    { initialData: [] as TranscriptMessage[], keepPreviousData: false },
   );
 
   const header = [

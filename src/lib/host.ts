@@ -98,7 +98,12 @@ export function detectHost(pid: number, table: Map<number, ProcessRow>): HostInf
     }
     if (isGuiHost(row.command)) {
       const appName = appNameOf(row.command);
-      return { kind: HOST_KINDS[appName] ?? "app", appName, hostPid: current, tty };
+      return {
+        kind: HOST_KINDS[appName] ?? "app",
+        appName,
+        hostPid: current,
+        tty,
+      };
     }
     current = row.ppid;
   }

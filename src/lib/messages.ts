@@ -5,7 +5,7 @@ import { readTail } from "./tail";
 const TAIL_BYTES = 768 * 1024;
 
 export interface TranscriptMessage {
-  readonly role: "user" | "claude";
+  readonly role: "user" | "claude" | "codex";
   readonly text: string;
   readonly timestampMs: number | null;
 }

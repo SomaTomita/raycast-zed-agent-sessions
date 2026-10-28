@@ -16,9 +16,7 @@ function parseElapsedSeconds(etime: string): number | null {
     return null;
   }
   const [, days, hours, minutes, seconds] = match;
-  return (
-    Number(days ?? 0) * 86_400 + Number(hours ?? 0) * 3_600 + Number(minutes) * 60 + Number(seconds)
-  );
+  return Number(days ?? 0) * 86_400 + Number(hours ?? 0) * 3_600 + Number(minutes) * 60 + Number(seconds);
 }
 
 /**
